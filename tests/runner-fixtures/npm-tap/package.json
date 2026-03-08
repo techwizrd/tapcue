@@ -6,6 +6,6 @@
     "test": "tap --reporter=tap test/*.test.js"
   },
   "devDependencies": {
-    "tap": "18.8.0"
+    "tap": "^21.6.2"
   }
 }

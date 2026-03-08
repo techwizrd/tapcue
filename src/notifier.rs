@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::ffi::OsString;
-
-use notify_rust::Notification;
+use std::process::Command;
 
 use crate::config::DesktopMode;
 use crate::processor::RunState;
@@ -151,17 +150,92 @@ trait NotificationSender {
     fn send(&self, title: &str, body: &str) -> Result<(), String>;
 }
 
-#[derive(Debug, Default)]
-struct NotifyRustSender;
+#[derive(Debug)]
+struct ShellNotificationSender {
+    platform: Platform,
+}
 
-impl NotificationSender for NotifyRustSender {
-    fn send(&self, title: &str, body: &str) -> Result<(), String> {
-        Notification::new()
-            .summary(title)
-            .body(body)
-            .show()
-            .map(|_| ())
+impl ShellNotificationSender {
+    fn new(platform: Platform) -> Self {
+        Self { platform }
+    }
+
+    fn send_linux(&self, title: &str, body: &str) -> Result<(), String> {
+        Command::new("notify-send")
+            .arg(title)
+            .arg(body)
+            .status()
             .map_err(|error| error.to_string())
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("notify-send exited with status {status}"))
+                }
+            })
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn send_macos(&self, title: &str, body: &str) -> Result<(), String> {
+        let escaped_title = title.replace('"', "\\\"");
+        let escaped_body = body.replace('"', "\\\"");
+        let script =
+            format!("display notification \"{escaped_body}\" with title \"{escaped_title}\"");
+
+        Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .status()
+            .map_err(|error| error.to_string())
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("osascript exited with status {status}"))
+                }
+            })
+    }
+
+    #[cfg(any(target_os = "windows", test))]
+    fn send_windows(&self, title: &str, body: &str) -> Result<(), String> {
+        let escaped_title = title.replace('"', "''");
+        let escaped_body = body.replace('"', "''");
+        let command = format!(
+            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; \
+            [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null; \
+            $xml = New-Object Windows.Data.Xml.Dom.XmlDocument; \
+            $xml.LoadXml('<toast><visual><binding template=\"ToastGeneric\"><text>{escaped_title}</text><text>{escaped_body}</text></binding></visual></toast>'); \
+            $toast = [Windows.UI.Notifications.ToastNotification]::new($xml); \
+            [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('tapcue').Show($toast);"
+        );
+
+        Command::new("powershell")
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg(command)
+            .status()
+            .map_err(|error| error.to_string())
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("powershell exited with status {status}"))
+                }
+            })
+    }
+}
+
+impl NotificationSender for ShellNotificationSender {
+    fn send(&self, title: &str, body: &str) -> Result<(), String> {
+        match self.platform {
+            #[cfg(any(target_os = "linux", test))]
+            Platform::Linux => self.send_linux(title, body),
+            #[cfg(any(target_os = "macos", test))]
+            Platform::MacOs => self.send_macos(title, body),
+            #[cfg(any(target_os = "windows", test))]
+            Platform::Windows => self.send_windows(title, body),
+            Platform::Other => Err("unsupported platform".to_owned()),
+        }
     }
 }
 
@@ -178,11 +252,12 @@ impl Default for DesktopNotifier {
 
 impl DesktopNotifier {
     pub fn new(mode: DesktopMode) -> Self {
+        let platform = current_platform();
         Self::with_components(
-            current_platform(),
+            platform,
             mode,
             Box::new(ProcessEnvironment),
-            Box::new(NotifyRustSender),
+            Box::new(ShellNotificationSender::new(platform)),
         )
     }
 

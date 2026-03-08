@@ -152,7 +152,7 @@ jobs:
           tool: cargo-nextest
 
       - name: Download tapcue debug binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: tapcue-debug-bin
           path: bin
@@ -179,7 +179,7 @@ jobs:
           go-version: stable
 
       - name: Download tapcue debug binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: tapcue-debug-bin
           path: bin
@@ -208,7 +208,7 @@ jobs:
           cache-dependency-path: tests/runner-fixtures/npm-tap/package-lock.json
 
       - name: Download tapcue debug binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: tapcue-debug-bin
           path: bin
@@ -237,7 +237,7 @@ jobs:
           cache-dependency-path: tests/runner-fixtures/jest-json/package-lock.json
 
       - name: Download tapcue debug binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: tapcue-debug-bin
           path: bin
@@ -266,7 +266,7 @@ jobs:
           cache-dependency-path: tests/runner-fixtures/vitest-json/package-lock.json
 
       - name: Download tapcue debug binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: tapcue-debug-bin
           path: bin

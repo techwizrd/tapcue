@@ -225,11 +225,12 @@ impl TapStreamProcessor {
             return;
         }
 
-        if self.pending_subtest_state.is_some() {
-            if !trimmed.starts_with("ok") && !trimmed.starts_with("not ok") {
-                self.protocol_failure("subtest must be followed by parent test point");
-                self.pending_subtest_state = None;
-            }
+        if self.pending_subtest_state.is_some()
+            && !trimmed.starts_with("ok")
+            && !trimmed.starts_with("not ok")
+        {
+            self.protocol_failure("subtest must be followed by parent test point");
+            self.pending_subtest_state = None;
         }
 
         if let Some(reason) = parse_bailout(trimmed) {

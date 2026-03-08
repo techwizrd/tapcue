@@ -1,0 +1,11 @@
+{
+  "name": "tapcue-npm-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "test": "tap --reporter=tap test/*.test.js"
+  },
+  "devDependencies": {
+    "tap": "18.8.0"
+  }
+}

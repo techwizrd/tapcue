@@ -1,0 +1,15 @@
+[parser]
+quiet_parse_errors = false
+
+[input]
+format = "auto"
+
+[notifications]
+enabled = true
+desktop = "auto"
+dedup_failures = true
+# max_failure_notifications = 20
+
+[output]
+summary_format = "none"
+# summary_file = "tapcue-summary.json"

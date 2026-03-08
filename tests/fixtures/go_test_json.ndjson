@@ -1,0 +1,4 @@
+{"Time":"2026-03-08T00:00:00Z","Action":"run","Package":"example","Test":"TestAlpha"}
+{"Time":"2026-03-08T00:00:01Z","Action":"pass","Package":"example","Test":"TestAlpha","Elapsed":0.01}
+{"Time":"2026-03-08T00:00:02Z","Action":"run","Package":"example","Test":"TestBeta"}
+{"Time":"2026-03-08T00:00:03Z","Action":"fail","Package":"example","Test":"TestBeta","Elapsed":0.02}

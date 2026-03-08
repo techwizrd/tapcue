@@ -1,0 +1,3 @@
+{"type":"test","event":"passed","name":"crate::suite::alpha"}
+{"type":"test","event":"failed","name":"crate::suite::beta"}
+{"type":"test","event":"ignored","name":"crate::suite::gamma"}

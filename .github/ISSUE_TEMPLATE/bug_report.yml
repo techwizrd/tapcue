@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible problem in tapcue
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include TAP sample and exact command if possible.
+      placeholder: |
+        1. Run command...
+        2. Provide TAP input...
+        3. Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: tapcue version
+      placeholder: tapcue 0.1.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, shell, desktop session details (if notification-related).
+      placeholder: Linux/macOS/Windows, DISPLAY/WAYLAND settings, etc.

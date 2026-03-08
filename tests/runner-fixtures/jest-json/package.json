@@ -1,0 +1,11 @@
+{
+  "name": "tapcue-jest-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "test:json": "jest --runInBand --json --outputFile=/dev/stdout"
+  },
+  "devDependencies": {
+    "jest": "29.7.0"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "success": false,
+  "numTotalTests": 3,
+  "numPassedTests": 1,
+  "numFailedTests": 1,
+  "numPendingTests": 1,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "status": "failed",
+          "fullName": "math add should fail"
+        }
+      ]
+    }
+  ]
+}

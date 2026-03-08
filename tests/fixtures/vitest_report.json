@@ -1,0 +1,14 @@
+{
+  "stats": {
+    "tests": 4,
+    "passes": 2,
+    "failures": 1,
+    "skipped": 1
+  },
+  "testResults": [
+    {
+      "status": "failed",
+      "name": "vitest suite failing test"
+    }
+  ]
+}

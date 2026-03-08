@@ -1,0 +1,19 @@
+/target/
+/tests/runner-fixtures/**/target/
+/tests/runner-fixtures/**/node_modules/
+/tests/runner-fixtures/**/.tap/
+PERFORMANCE.md
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tool caches
+.pre-commit-cache/
+.prek-cache/

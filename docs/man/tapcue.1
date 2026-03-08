@@ -1,0 +1,136 @@
+.TH TAPCUE 1 "March 2026" "tapcue" "User Commands"
+.SH NAME
+tapcue \- stream TAP/JSON test output and emit desktop notifications
+.SH SYNOPSIS
+.B tapcue
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B tapcue
+reads test output from standard input.
+It supports TAP streams and JSON streams from common test runners, then
+emits failure, bailout, and summary notifications.
+
+Format selection defaults to auto-detection. A run summary can also be emitted
+as text or JSON for automation.
+.SH OPTIONS
+.TP
+.B --quiet-parse-errors
+Suppress parse warnings for malformed TAP.
+.TP
+.B --no-quiet-parse-errors
+Force parse warnings on.
+.TP
+.B --no-notify
+Disable desktop notifications.
+.TP
+.B --notify
+Force desktop notifications on.
+.TP
+.BI --desktop " auto|force-on|force-off"
+Desktop notification mode override.
+.TP
+.BI --format " auto|tap|json"
+Input parsing format (default: auto).
+.TP
+.BI --summary-format " none|text|json"
+Emit a final run summary.
+.TP
+.BI --summary-file " PATH|-"
+Write summary output to a file, or use
+.B -
+for stdout.
+.TP
+.B --dedup-failures
+Deduplicate repeated failure notifications.
+.TP
+.B --no-dedup-failures
+Disable failure-notification deduplication.
+.TP
+.BI --max-failure-notifications " N"
+Cap emitted failure notifications per run.
+.TP
+.B --trace-detection
+Print input format auto-detection decisions.
+.TP
+.B --validate-config
+Validate merged config and exit.
+.TP
+.B --print-effective-config
+Print merged config and exit.
+.TP
+.B -h, --help
+Show help.
+.TP
+.B -V, --version
+Show version.
+.SH ENVIRONMENT
+.TP
+.B TAPCUE_QUIET_PARSE_ERRORS
+Set parser warning suppression (true/false).
+.TP
+.B TAPCUE_NO_NOTIFY
+Disable notifications (true/false).
+.TP
+.B TAPCUE_NOTIFICATIONS_ENABLED
+Enable or disable notifications (true/false).
+.TP
+.B TAPCUE_DESKTOP
+Desktop mode override: auto, force-on, force-off.
+.TP
+.B TAPCUE_FORMAT
+Input format override: auto, tap, json.
+.TP
+.B TAPCUE_SUMMARY_FORMAT
+Summary format: none, text, json.
+.TP
+.B TAPCUE_SUMMARY_FILE
+Summary output destination path.
+.TP
+.B TAPCUE_DEDUP_FAILURES
+Enable or disable deduplication (true/false).
+.TP
+.B TAPCUE_MAX_FAILURE_NOTIFICATIONS
+Maximum failure notifications emitted.
+.TP
+.B TAPCUE_TRACE_DETECTION
+Enable format-detection trace output (true/false).
+.SH CONFIG FILES
+.TP
+.I ./.tapcue.toml
+Project-local configuration override.
+.TP
+.I <user-config-dir>/tapcue/config.toml
+User-level configuration.
+
+Precedence order:
+CLI flags > environment variables > local config > user config > defaults.
+.SH EXAMPLES
+.TP
+Basic TAP usage:
+.B prove -v t/*.t | tapcue
+.TP
+Go JSON stream:
+.B go test ./... -json | tapcue
+.TP
+Nextest JSON stream:
+.B env NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --message-format libtest-json-plus | tapcue
+.TP
+Disable notifications:
+.B cat results.tap | tapcue --no-notify
+.TP
+Emit JSON summary to a file:
+.B go test ./... -json | tapcue --summary-format json --summary-file run-summary.json
+.TP
+Validate merged config:
+.B tapcue --validate-config
+.SH EXIT STATUS
+.TP
+.B 0
+Run is successful.
+.TP
+.B non-zero
+Run failed, protocol failure occurred, or a processing/config error happened.
+.SH SEE ALSO
+.BR README.md ,
+.BR docs/format-detection.md ,
+.BR docs/tap14-compliance.md

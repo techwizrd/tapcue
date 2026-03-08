@@ -145,6 +145,11 @@ For complete CLI documentation, run:
 tapcue --help
 ```
 
+Manual pages and quick command examples:
+
+- Man page source: `docs/man/tapcue.1`
+- TLDR/tealdeer page source: `docs/tldr/tapcue.md`
+
 ## Development
 
 Install optional dev tools (including `cargo-nextest`) with:
@@ -192,3 +197,5 @@ Individual integration checks:
 - Support information: `SUPPORT.md`
 - Changelog: `CHANGELOG.md`
 - TAP14 compliance notes: `docs/tap14-compliance.md`
+- Man page source: `docs/man/tapcue.1`
+- TLDR/tealdeer source: `docs/tldr/tapcue.md`

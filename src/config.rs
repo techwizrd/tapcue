@@ -586,6 +586,64 @@ mod tests {
     }
 
     #[test]
+    fn env_can_set_output_and_notification_options() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let _summary_format = ScopedEnv::set("TAPCUE_SUMMARY_FORMAT", "text");
+        let _summary_file = ScopedEnv::set("TAPCUE_SUMMARY_FILE", "report.txt");
+        let _dedup = ScopedEnv::set("TAPCUE_DEDUP_FAILURES", "false");
+        let _max_fail = ScopedEnv::set("TAPCUE_MAX_FAILURE_NOTIFICATIONS", "3");
+        let _trace = ScopedEnv::set("TAPCUE_TRACE_DETECTION", "true");
+
+        let mut cfg = EffectiveConfig::default();
+        cfg.merge_env();
+
+        assert_eq!(cfg.summary_format, SummaryFormat::Text);
+        assert_eq!(cfg.summary_file.as_deref(), Some(Path::new("report.txt")));
+        assert!(!cfg.dedup_failures);
+        assert_eq!(cfg.max_failure_notifications, Some(3));
+        assert!(cfg.trace_detection);
+    }
+
+    #[test]
+    fn invalid_env_values_do_not_override_defaults() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let _summary_format = ScopedEnv::set("TAPCUE_SUMMARY_FORMAT", "bogus");
+        let _max_fail = ScopedEnv::set("TAPCUE_MAX_FAILURE_NOTIFICATIONS", "abc");
+        let _format = ScopedEnv::set("TAPCUE_FORMAT", "yaml");
+
+        let mut cfg = EffectiveConfig::default();
+        cfg.merge_env();
+
+        assert_eq!(cfg.summary_format, SummaryFormat::None);
+        assert_eq!(cfg.max_failure_notifications, None);
+        assert_eq!(cfg.input_format, InputFormat::Auto);
+    }
+
+    #[test]
+    fn env_bool_aliases_are_accepted() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let _quiet = ScopedEnv::set("TAPCUE_QUIET_PARSE_ERRORS", "yes");
+        let _notify_enabled = ScopedEnv::set("TAPCUE_NOTIFICATIONS_ENABLED", "off");
+
+        let mut cfg = EffectiveConfig::default();
+        cfg.merge_env();
+
+        assert!(cfg.quiet_parse_errors);
+        assert!(cfg.no_notify);
+    }
+
+    #[test]
+    fn invalid_bool_env_value_is_ignored() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let _quiet = ScopedEnv::set("TAPCUE_QUIET_PARSE_ERRORS", "perhaps");
+
+        let mut cfg = EffectiveConfig::default();
+        cfg.merge_env();
+
+        assert!(!cfg.quiet_parse_errors);
+    }
+
+    #[test]
     fn effective_config_renders_user_facing_shape() {
         let cfg = EffectiveConfig {
             quiet_parse_errors: true,

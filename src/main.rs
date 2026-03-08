@@ -114,3 +114,76 @@ fn summary_destination(path: Option<&Path>) -> SummaryDestination<'_> {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::{emit_summary, render_json_summary, render_text_summary, summary_destination};
+    use tapcue::config::{DesktopMode, EffectiveConfig, InputFormat, SummaryFormat};
+    use tapcue::processor::RunState;
+
+    fn sample_state() -> RunState {
+        RunState {
+            planned: Some(2),
+            total: 2,
+            passed: 1,
+            failed: 1,
+            todo: 0,
+            skipped: 0,
+            bailout_reason: None,
+            parse_warning_count: 0,
+            protocol_failures: 0,
+        }
+    }
+
+    fn sample_config() -> EffectiveConfig {
+        EffectiveConfig {
+            quiet_parse_errors: false,
+            no_notify: true,
+            desktop_mode: DesktopMode::Auto,
+            input_format: InputFormat::Tap,
+            summary_format: SummaryFormat::None,
+            summary_file: None,
+            dedup_failures: true,
+            max_failure_notifications: None,
+            trace_detection: false,
+        }
+    }
+
+    #[test]
+    fn render_text_summary_formats_expected_fields() {
+        let rendered = render_text_summary(&sample_state());
+        assert!(rendered.contains("status=failure"));
+        assert!(rendered.contains("total=2"));
+        assert!(rendered.contains("failed=1"));
+    }
+
+    #[test]
+    fn render_json_summary_contains_json_fields() {
+        let rendered = render_json_summary(&sample_state()).expect("json summary should render");
+        assert!(rendered.contains("\"total\": 2"));
+        assert!(rendered.contains("\"failed\": 1"));
+    }
+
+    #[test]
+    fn summary_destination_dash_means_stdout() {
+        let destination = summary_destination(Some(std::path::Path::new("-")));
+        assert!(matches!(destination, super::SummaryDestination::Stdout));
+    }
+
+    #[test]
+    fn emit_summary_writes_file_when_configured() {
+        let dir = tempdir().expect("temp dir should create");
+        let path = dir.path().join("summary.txt");
+        let mut cfg = sample_config();
+        cfg.summary_format = SummaryFormat::Text;
+        cfg.summary_file = Some(path.clone());
+
+        emit_summary(&cfg, &sample_state()).expect("emit summary should succeed");
+        let content = fs::read_to_string(path).expect("summary file should exist");
+        assert!(content.contains("status=failure"));
+    }
+}

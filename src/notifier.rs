@@ -288,6 +288,15 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct FailingSender;
+
+    impl NotificationSender for FailingSender {
+        fn send(&self, _title: &str, _body: &str) -> Result<(), String> {
+            Err("boom".to_owned())
+        }
+    }
+
     fn sample_state() -> RunState {
         RunState {
             planned: Some(2),
@@ -298,6 +307,7 @@ mod tests {
             skipped: 0,
             bailout_reason: None,
             parse_warning_count: 0,
+            protocol_failures: 0,
         }
     }
 
@@ -410,5 +420,104 @@ mod tests {
         assert_eq!(notifications.len(), 2);
         assert_eq!(notifications[0].1, "one");
         assert_eq!(notifications[1].1, "two");
+    }
+
+    #[test]
+    fn policy_notifier_without_dedup_allows_repeated_labels() {
+        let (sender, shared) = RecordingSender::shared();
+        let mut desktop = DesktopNotifier::with_components(
+            Platform::Linux,
+            DesktopMode::ForceOn,
+            Box::new(FakeEnvironment::new(&[])),
+            Box::new(sender),
+        );
+        let mut notifier = PolicyNotifier::new(
+            &mut desktop,
+            NotificationPolicy { dedup_failures: false, max_failure_notifications: Some(3) },
+        );
+
+        notifier.notify_failure("same");
+        notifier.notify_failure("same");
+        notifier.notify_failure("same");
+
+        let notifications = shared.lock().expect("lock should not be poisoned");
+        assert_eq!(notifications.len(), 3);
+    }
+
+    #[test]
+    fn desktop_notifier_handles_sender_errors_without_panicking() {
+        let mut notifier = DesktopNotifier::with_components(
+            Platform::Linux,
+            DesktopMode::ForceOn,
+            Box::new(FakeEnvironment::new(&[])),
+            Box::new(FailingSender),
+        );
+
+        notifier.notify_failure("alpha");
+        notifier.notify_bailout("stop");
+        notifier.notify_summary(&sample_state());
+    }
+
+    #[test]
+    fn policy_notifier_zero_limit_suppresses_all_failures() {
+        let (sender, shared) = RecordingSender::shared();
+        let mut desktop = DesktopNotifier::with_components(
+            Platform::Linux,
+            DesktopMode::ForceOn,
+            Box::new(FakeEnvironment::new(&[])),
+            Box::new(sender),
+        );
+        let mut notifier = PolicyNotifier::new(
+            &mut desktop,
+            NotificationPolicy { dedup_failures: false, max_failure_notifications: Some(0) },
+        );
+
+        notifier.notify_failure("one");
+        notifier.notify_failure("two");
+
+        assert!(shared.lock().expect("lock should not be poisoned").is_empty());
+    }
+
+    #[test]
+    fn policy_notifier_forwards_bailout_and_summary() {
+        let (sender, shared) = RecordingSender::shared();
+        let mut desktop = DesktopNotifier::with_components(
+            Platform::Linux,
+            DesktopMode::ForceOn,
+            Box::new(FakeEnvironment::new(&[])),
+            Box::new(sender),
+        );
+        let mut notifier = PolicyNotifier::new(&mut desktop, NotificationPolicy::default());
+
+        notifier.notify_bailout("catastrophic");
+        notifier.notify_summary(&sample_state());
+
+        let notifications = shared.lock().expect("lock should not be poisoned");
+        assert_eq!(notifications.len(), 2);
+        assert_eq!(notifications[0].0, "TAP bailout");
+        assert_eq!(notifications[1].0, "TAP summary");
+    }
+
+    #[test]
+    fn dedup_tracking_cap_falls_back_to_limit_only() {
+        let (sender, shared) = RecordingSender::shared();
+        let mut desktop = DesktopNotifier::with_components(
+            Platform::Linux,
+            DesktopMode::ForceOn,
+            Box::new(FakeEnvironment::new(&[])),
+            Box::new(sender),
+        );
+        let mut notifier = PolicyNotifier::new(
+            &mut desktop,
+            NotificationPolicy { dedup_failures: true, max_failure_notifications: Some(5000) },
+        );
+
+        for i in 0..4200 {
+            notifier.notify_failure(&format!("label-{i}"));
+        }
+        notifier.notify_failure("label-4097");
+
+        let notifications = shared.lock().expect("lock should not be poisoned");
+        assert_eq!(notifications.len(), 4201);
     }
 }

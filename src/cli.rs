@@ -78,21 +78,21 @@ pub struct Cli {
     pub print_effective_config: bool,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum CliDesktopMode {
     Auto,
     ForceOn,
     ForceOff,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum CliInputFormat {
     Auto,
     Tap,
     Json,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum CliSummaryFormat {
     None,
     Text,
@@ -126,5 +126,63 @@ impl From<CliSummaryFormat> for SummaryFormat {
             CliSummaryFormat::Text => SummaryFormat::Text,
             CliSummaryFormat::Json => SummaryFormat::Json,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, CliDesktopMode, CliInputFormat, CliSummaryFormat};
+    use crate::config::{DesktopMode, InputFormat, SummaryFormat};
+
+    #[test]
+    fn parses_flags_and_options() {
+        let cli = Cli::parse_from([
+            "tapcue",
+            "--quiet-parse-errors",
+            "--notify",
+            "--desktop",
+            "force-on",
+            "--format",
+            "json",
+            "--summary-format",
+            "text",
+            "--summary-file",
+            "-",
+            "--dedup-failures",
+            "--max-failure-notifications",
+            "12",
+            "--trace-detection",
+            "--validate-config",
+            "--print-effective-config",
+        ]);
+
+        assert!(cli.quiet_parse_errors);
+        assert!(cli.notify);
+        assert_eq!(cli.desktop, Some(CliDesktopMode::ForceOn));
+        assert_eq!(cli.format, Some(CliInputFormat::Json));
+        assert_eq!(cli.summary_format, Some(CliSummaryFormat::Text));
+        assert_eq!(cli.summary_file.as_deref(), Some("-"));
+        assert!(cli.dedup_failures);
+        assert_eq!(cli.max_failure_notifications, Some(12));
+        assert!(cli.trace_detection);
+        assert!(cli.validate_config);
+        assert!(cli.print_effective_config);
+    }
+
+    #[test]
+    fn enum_conversions_cover_all_values() {
+        assert!(matches!(DesktopMode::from(CliDesktopMode::Auto), DesktopMode::Auto));
+        assert!(matches!(DesktopMode::from(CliDesktopMode::ForceOn), DesktopMode::ForceOn));
+        assert!(matches!(DesktopMode::from(CliDesktopMode::ForceOff), DesktopMode::ForceOff));
+
+        assert!(matches!(InputFormat::from(CliInputFormat::Auto), InputFormat::Auto));
+        assert!(matches!(InputFormat::from(CliInputFormat::Tap), InputFormat::Tap));
+        assert!(matches!(InputFormat::from(CliInputFormat::Json), InputFormat::Json));
+
+        assert!(matches!(SummaryFormat::from(CliSummaryFormat::None), SummaryFormat::None));
+        assert!(matches!(SummaryFormat::from(CliSummaryFormat::Text), SummaryFormat::Text));
+        assert!(matches!(SummaryFormat::from(CliSummaryFormat::Json), SummaryFormat::Json));
     }
 }

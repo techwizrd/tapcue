@@ -8,6 +8,7 @@
 pub mod cli;
 pub mod config;
 pub mod json_stream;
+pub(crate) mod line_buffer;
 pub mod notifier;
 pub mod processor;
 
@@ -203,7 +204,7 @@ mod tests {
 
     use crate::notifier::Notifier;
 
-    use super::{process_stream, AppConfig, RunState};
+    use super::{detect_auto_format, fallback_format, process_stream, AppConfig, RunState};
 
     #[derive(Default)]
     struct RecordingNotifier {
@@ -294,5 +295,117 @@ mod tests {
         assert_eq!(state.total, 2000);
         assert_eq!(state.failed, 0);
         assert!(state.is_success());
+    }
+
+    #[test]
+    fn auto_detects_json_stream() {
+        let input = "{\"Action\":\"pass\",\"Test\":\"A\"}\n{\"Action\":\"fail\",\"Test\":\"B\"}\n";
+        let mut notifier = RecordingNotifier::default();
+
+        let state = process_stream(
+            TinyChunkReader::new(input, 2),
+            &mut notifier,
+            AppConfig {
+                quiet_parse_errors: false,
+                input_format: crate::config::InputFormat::Auto,
+                trace_detection: false,
+            },
+        )
+        .expect("auto JSON should parse");
+
+        assert_eq!(state.total, 2);
+        assert_eq!(state.failed, 1);
+    }
+
+    #[test]
+    fn explicit_tap_mode_parses_tap_without_detection() {
+        let input = "TAP version 14\n1..1\nok 1 - only\n";
+        let mut notifier = RecordingNotifier::default();
+
+        let state = process_stream(
+            TinyChunkReader::new(input, 3),
+            &mut notifier,
+            AppConfig {
+                quiet_parse_errors: false,
+                input_format: crate::config::InputFormat::Tap,
+                trace_detection: true,
+            },
+        )
+        .expect("tap mode should parse");
+
+        assert_eq!(state.total, 1);
+        assert!(state.is_success());
+    }
+
+    #[test]
+    fn auto_fallback_kicks_in_for_large_undecided_prefix() {
+        let mut input = String::new();
+        input.push_str(&"x".repeat(70_000));
+        input.push('\n');
+        input.push_str("TAP version 14\n1..1\nok 1 - late\n");
+
+        let mut notifier = RecordingNotifier::default();
+        let state = process_stream(
+            TinyChunkReader::new(&input, 16),
+            &mut notifier,
+            AppConfig {
+                quiet_parse_errors: false,
+                input_format: crate::config::InputFormat::Auto,
+                trace_detection: true,
+            },
+        )
+        .expect("fallback should parse");
+
+        assert_eq!(state.total, 1);
+        assert!(state.parse_warning_count >= 1);
+    }
+
+    #[test]
+    fn auto_detection_helpers_cover_common_inputs() {
+        assert!(matches!(
+            detect_auto_format("{\"a\":1}\n"),
+            Some(crate::config::InputFormat::Json)
+        ));
+        assert!(matches!(
+            detect_auto_format("TAP version 14\n"),
+            Some(crate::config::InputFormat::Tap)
+        ));
+        assert!(matches!(
+            detect_auto_format("ok 1 - works\n"),
+            Some(crate::config::InputFormat::Tap)
+        ));
+        assert!(matches!(
+            detect_auto_format("not ok 1 - fails\n"),
+            Some(crate::config::InputFormat::Tap)
+        ));
+        assert!(matches!(
+            detect_auto_format("Bail out! stop\n"),
+            Some(crate::config::InputFormat::Tap)
+        ));
+        assert!(matches!(detect_auto_format("1..5\n"), Some(crate::config::InputFormat::Tap)));
+        assert!(detect_auto_format("hello world\n").is_none());
+        assert!(detect_auto_format("\n\n").is_none());
+
+        assert!(matches!(fallback_format(" [1,2,3]"), crate::config::InputFormat::Json));
+        assert!(matches!(fallback_format("ok 1 - test"), crate::config::InputFormat::Tap));
+        assert!(matches!(fallback_format(""), crate::config::InputFormat::Tap));
+    }
+
+    #[test]
+    fn auto_mode_with_empty_input_defaults_to_tap() {
+        let mut notifier = RecordingNotifier::default();
+        let state = process_stream(
+            TinyChunkReader::new("", 8),
+            &mut notifier,
+            AppConfig {
+                quiet_parse_errors: false,
+                input_format: crate::config::InputFormat::Auto,
+                trace_detection: false,
+            },
+        )
+        .expect("empty stream should be processed");
+
+        assert_eq!(state.total, 0);
+        assert_eq!(notifier.summaries, 1);
     }
 }

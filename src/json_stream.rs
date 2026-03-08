@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::line_buffer::take_next_line;
 use crate::notifier::Notifier;
 use crate::processor::RunState;
 
@@ -32,6 +33,7 @@ impl JsonStreamProcessor {
                 skipped: 0,
                 bailout_reason: None,
                 parse_warning_count: 0,
+                protocol_failures: 0,
             },
         }
     }
@@ -43,9 +45,7 @@ impl JsonStreamProcessor {
 
         self.partial_line.push_str(chunk);
 
-        while let Some(pos) = self.partial_line.find('\n') {
-            let line = self.partial_line[..pos].to_owned();
-            self.partial_line.drain(..=pos);
+        while let Some(line) = take_next_line(&mut self.partial_line) {
             self.process_line(&line, notifier);
         }
     }
@@ -155,7 +155,7 @@ impl JsonStreamProcessor {
             .or_else(|| value.get("test").and_then(Value::as_str))
             .unwrap_or("unknown");
 
-        match event_name.as_str() {
+        match event_name {
             "passed" | "ok" => self.record_pass(),
             "failed" => self.record_failure(label, notifier),
             "ignored" | "skipped" => self.record_skip(),
@@ -278,24 +278,24 @@ fn number_field(value: Option<&Value>) -> Option<usize> {
     value.and_then(Value::as_u64).and_then(|raw| usize::try_from(raw).ok())
 }
 
-fn nextest_event_name(value: &Value) -> String {
+fn nextest_event_name(value: &Value) -> &str {
     let Some(event) = value.get("event") else {
-        return "unknown".to_owned();
+        return "unknown";
     };
 
     if let Some(name) = event.as_str() {
-        return name.to_owned();
+        return name;
     }
 
     if let Some(name) = event.get("status").and_then(Value::as_str) {
-        return name.to_owned();
+        return name;
     }
 
     if let Some(name) = event.get("kind").and_then(Value::as_str) {
-        return name.to_owned();
+        return name;
     }
 
-    "unknown".to_owned()
+    "unknown"
 }
 
 #[cfg(test)]
@@ -424,5 +424,122 @@ mod tests {
         let state = processor.into_state();
         assert_eq!(state.parse_warning_count, 1);
         assert_eq!(notifier.summaries, 1);
+    }
+
+    #[test]
+    fn vitest_stats_summary_document_is_applied() {
+        let mut processor = JsonStreamProcessor::new(false);
+        let mut notifier = RecordingNotifier::default();
+
+        processor.ingest(
+            "{\"stats\":{\"tests\":4,\"passes\":2,\"failures\":1,\"skipped\":1}}\n",
+            &mut notifier,
+        );
+        processor.finish(&mut notifier);
+
+        let state = processor.into_state();
+        assert_eq!(state.total, 4);
+        assert_eq!(state.passed, 2);
+        assert_eq!(state.failed, 1);
+        assert_eq!(state.skipped, 1);
+    }
+
+    #[test]
+    fn failed_suite_status_emits_failure_label() {
+        let mut processor = JsonStreamProcessor::new(false);
+        let mut notifier = RecordingNotifier::default();
+
+        processor.ingest(
+            "{\"numTotalTests\":1,\"numPassedTests\":0,\"numFailedTests\":1,\"testResults\":[{\"status\":\"failed\",\"name\":\"suite-name\"}]}\n",
+            &mut notifier,
+        );
+        processor.finish(&mut notifier);
+
+        let state = processor.into_state();
+        assert_eq!(state.failed, 1);
+        assert_eq!(notifier.failures, vec!["suite-name".to_owned()]);
+    }
+
+    #[test]
+    fn empty_lines_and_non_json_after_json_emit_single_warning() {
+        let mut processor = JsonStreamProcessor::new(false);
+        let mut notifier = RecordingNotifier::default();
+
+        processor.ingest("\n", &mut notifier);
+        processor.ingest("{\"Action\":\"pass\",\"Test\":\"A\"}\n", &mut notifier);
+        processor.ingest("not-json\n", &mut notifier);
+        processor.ingest("still-not-json\n", &mut notifier);
+        processor.finish(&mut notifier);
+
+        let state = processor.into_state();
+        assert_eq!(state.total, 1);
+        assert_eq!(state.passed, 1);
+        assert_eq!(state.parse_warning_count, 1);
+    }
+
+    #[test]
+    fn nextest_string_events_for_todo_and_skip_are_supported() {
+        let mut processor = JsonStreamProcessor::new(false);
+        let mut notifier = RecordingNotifier::default();
+
+        processor.ingest(
+            "{\"type\":\"test\",\"event\":\"todo\",\"name\":\"crate::todo\"}\n",
+            &mut notifier,
+        );
+        processor.ingest(
+            "{\"type\":\"test\",\"event\":\"skipped\",\"name\":\"crate::skip\"}\n",
+            &mut notifier,
+        );
+        processor.finish(&mut notifier);
+
+        let state = processor.into_state();
+        assert_eq!(state.total, 2);
+        assert_eq!(state.todo, 1);
+        assert_eq!(state.skipped, 1);
+    }
+
+    #[test]
+    fn jest_assertion_results_emit_failure_labels() {
+        let mut processor = JsonStreamProcessor::new(false);
+        let mut notifier = RecordingNotifier::default();
+
+        processor.ingest(
+            "{\"numTotalTests\":2,\"numPassedTests\":1,\"numFailedTests\":1,\"testResults\":[{\"assertionResults\":[{\"status\":\"failed\",\"fullName\":\"suite should fail\"}]}]}\n",
+            &mut notifier,
+        );
+        processor.finish(&mut notifier);
+
+        let state = processor.into_state();
+        assert_eq!(state.failed, 1);
+        assert_eq!(notifier.failures, vec!["suite should fail".to_owned()]);
+    }
+
+    #[test]
+    fn nextest_ok_event_counts_pass() {
+        let mut processor = JsonStreamProcessor::new(false);
+        let mut notifier = RecordingNotifier::default();
+
+        processor
+            .ingest("{\"type\":\"test\",\"event\":\"ok\",\"name\":\"crate::ok\"}\n", &mut notifier);
+        processor.finish(&mut notifier);
+
+        let state = processor.into_state();
+        assert_eq!(state.total, 1);
+        assert_eq!(state.passed, 1);
+    }
+
+    #[test]
+    fn go_output_and_run_events_do_not_affect_counts() {
+        let mut processor = JsonStreamProcessor::new(false);
+        let mut notifier = RecordingNotifier::default();
+
+        processor.ingest("{\"Action\":\"run\",\"Test\":\"A\"}\n", &mut notifier);
+        processor.ingest("{\"Action\":\"output\",\"Output\":\"hello\"}\n", &mut notifier);
+        processor.finish(&mut notifier);
+
+        let state = processor.into_state();
+        assert_eq!(state.total, 0);
+        assert_eq!(state.passed, 0);
+        assert_eq!(state.failed, 0);
     }
 }

@@ -1,9 +1,9 @@
 # tapcue
 
 [![CI](https://img.shields.io/github/actions/workflow/status/techwizrd/tapcue/ci.yml?branch=main)](https://github.com/techwizrd/tapcue/actions/workflows/ci.yml)
-[![Crates.io](https://img.shields.io/crates/v/tapcue.svg)](https://crates.io/crates/tapcue)
-[![Docs.rs](https://img.shields.io/docsrs/tapcue)](https://docs.rs/tapcue)
-[![License](https://img.shields.io/crates/l/tapcue.svg)](LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/techwizrd/tapcue?sort=semver)](https://github.com/techwizrd/tapcue/releases)
+[![MSRV](https://img.shields.io/badge/MSRV-1.75-blue?logo=rust)](https://github.com/techwizrd/tapcue/blob/main/Cargo.toml)
+[![License](https://img.shields.io/github/license/techwizrd/tapcue)](LICENSE)
 
 `tapcue` reads TAP (Test Anything Protocol) output from `stdin` and sends desktop notifications for:
 
@@ -191,3 +191,4 @@ Individual integration checks:
 - Security policy: `SECURITY.md`
 - Support information: `SUPPORT.md`
 - Changelog: `CHANGELOG.md`
+- TAP14 compliance notes: `docs/tap14-compliance.md`

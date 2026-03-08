@@ -118,3 +118,29 @@ fn summary_file_dash_writes_to_stdout() {
         .failure()
         .stdout(predicates::str::contains("\"failed\": 1"));
 }
+
+#[test]
+fn summary_text_emits_text_line() {
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .arg("--summary-format")
+        .arg("text")
+        .write_stdin(fixture("passing.tap"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("status=success total=2 passed=2"));
+}
+
+#[test]
+fn invalid_config_file_fails_with_context() {
+    let dir = tempdir().expect("temp dir should create");
+    fs::write(dir.path().join(".tapcue.toml"), "[notifications\nenabled=true\n")
+        .expect("invalid file should be created");
+
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .current_dir(dir.path())
+        .arg("--validate-config")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("failed to parse TOML config file"));
+}

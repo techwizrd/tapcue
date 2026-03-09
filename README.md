@@ -149,6 +149,7 @@ Manual pages and quick command examples:
 
 - Man page source: `docs/man/tapcue.1`
 - TLDR/tealdeer page source: `docs/tldr/tapcue.md`
+- TLDR upstream submission copy: `contrib/tldr/pages/common/tapcue.md`
 
 ## Development
 
@@ -199,3 +200,4 @@ Individual integration checks:
 - TAP14 compliance notes: `docs/tap14-compliance.md`
 - Man page source: `docs/man/tapcue.1`
 - TLDR/tealdeer source: `docs/tldr/tapcue.md`
+- TLDR upstream submission copy: `contrib/tldr/pages/common/tapcue.md`

@@ -78,6 +78,11 @@ fn crlf_is_accepted() {
 }
 
 #[test]
+fn cr_only_line_endings_are_accepted() {
+    run_tap("TAP version 14\r1..1\rok 1 - cr\r").success();
+}
+
+#[test]
 fn duplicate_plan_is_protocol_failure() {
     run_tap("TAP version 14\n1..1\nok 1 - first\n1..1\n")
         .failure()

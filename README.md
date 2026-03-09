@@ -175,7 +175,7 @@ cargo bench --features benchmarks --bench stream_processing
 prek run -c .prek/config.toml --all-files
 ```
 
-Cross-runner integration verification (Rust nextest, Go, npm TAP):
+Cross-runner integration verification (Rust nextest, Go, npm TAP, Jest JSON, Vitest JSON):
 
 ```bash
 ./scripts/verify-runner-integrations.sh

@@ -11,13 +11,13 @@ impl LineBuffer {
 
     pub(crate) fn take_next_line(&mut self) -> Option<String> {
         let remaining = &self.buffer[self.start..];
-        let newline_idx = remaining.find('\n')?;
-        let end = self.start + newline_idx;
+        let (line_end_idx, separator_len) = find_line_separator(remaining)?;
+        let end = self.start + line_end_idx;
 
         let mut line = self.buffer[self.start..end].to_owned();
         trim_cr(&mut line);
 
-        self.start = end + 1;
+        self.start = end + separator_len;
         self.compact_if_needed();
         Some(line)
     }
@@ -53,5 +53,51 @@ impl LineBuffer {
 pub(crate) fn trim_cr(line: &mut String) {
     if line.ends_with('\r') {
         line.pop();
+    }
+}
+
+fn find_line_separator(input: &str) -> Option<(usize, usize)> {
+    let bytes = input.as_bytes();
+    let idx = bytes.iter().position(|byte| *byte == b'\n' || *byte == b'\r')?;
+
+    if bytes[idx] == b'\r' && bytes.get(idx + 1) == Some(&b'\n') {
+        Some((idx, 2))
+    } else {
+        Some((idx, 1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LineBuffer;
+
+    #[test]
+    fn splits_lf_lines() {
+        let mut buffer = LineBuffer::default();
+        buffer.push_str("a\nb\n");
+
+        assert_eq!(buffer.take_next_line().as_deref(), Some("a"));
+        assert_eq!(buffer.take_next_line().as_deref(), Some("b"));
+        assert_eq!(buffer.take_next_line(), None);
+    }
+
+    #[test]
+    fn splits_crlf_lines() {
+        let mut buffer = LineBuffer::default();
+        buffer.push_str("a\r\nb\r\n");
+
+        assert_eq!(buffer.take_next_line().as_deref(), Some("a"));
+        assert_eq!(buffer.take_next_line().as_deref(), Some("b"));
+        assert_eq!(buffer.take_next_line(), None);
+    }
+
+    #[test]
+    fn splits_cr_only_lines() {
+        let mut buffer = LineBuffer::default();
+        buffer.push_str("a\rb\r");
+
+        assert_eq!(buffer.take_next_line().as_deref(), Some("a"));
+        assert_eq!(buffer.take_next_line().as_deref(), Some("b"));
+        assert_eq!(buffer.take_next_line(), None);
     }
 }

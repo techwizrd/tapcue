@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use crate::line_buffer::{take_next_line, trim_cr};
+use crate::line_buffer::LineBuffer;
 use crate::notifier::Notifier;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -38,7 +38,7 @@ impl RunState {
 #[derive(Debug)]
 pub struct TapStreamProcessor {
     quiet_parse_errors: bool,
-    partial_line: String,
+    partial_line: LineBuffer,
     strict_mode: bool,
     in_yaml_block: bool,
     yaml_can_start: bool,
@@ -61,7 +61,7 @@ impl TapStreamProcessor {
     pub fn new(quiet_parse_errors: bool) -> Self {
         Self {
             quiet_parse_errors,
-            partial_line: String::new(),
+            partial_line: LineBuffer::default(),
             strict_mode: false,
             in_yaml_block: false,
             yaml_can_start: false,
@@ -94,15 +94,13 @@ impl TapStreamProcessor {
     pub fn ingest(&mut self, chunk: &str, notifier: &mut dyn Notifier) {
         self.partial_line.push_str(chunk);
 
-        while let Some(line) = take_next_line(&mut self.partial_line) {
+        while let Some(line) = self.partial_line.take_next_line() {
             self.process_line(&line, notifier);
         }
     }
 
     pub fn finish(&mut self, notifier: &mut dyn Notifier) {
-        if !self.partial_line.is_empty() {
-            let mut line = std::mem::take(&mut self.partial_line);
-            trim_cr(&mut line);
+        if let Some(line) = self.partial_line.take_remainder() {
             self.process_line(&line, notifier);
         }
 

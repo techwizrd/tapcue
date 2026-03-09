@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::line_buffer::take_next_line;
+use crate::line_buffer::LineBuffer;
 use crate::notifier::Notifier;
 use crate::processor::RunState;
 
@@ -11,7 +11,7 @@ pub struct JsonStreamProcessor {
     warned_parse_issue: bool,
     observed_test_events: bool,
     document_buffer: String,
-    partial_line: String,
+    partial_line: LineBuffer,
     state: RunState,
 }
 
@@ -23,7 +23,7 @@ impl JsonStreamProcessor {
             warned_parse_issue: false,
             observed_test_events: false,
             document_buffer: String::new(),
-            partial_line: String::new(),
+            partial_line: LineBuffer::default(),
             state: RunState {
                 planned: None,
                 total: 0,
@@ -45,14 +45,13 @@ impl JsonStreamProcessor {
 
         self.partial_line.push_str(chunk);
 
-        while let Some(line) = take_next_line(&mut self.partial_line) {
+        while let Some(line) = self.partial_line.take_next_line() {
             self.process_line(&line, notifier);
         }
     }
 
     pub fn finish(&mut self, notifier: &mut dyn Notifier) {
-        if !self.partial_line.is_empty() {
-            let line = std::mem::take(&mut self.partial_line);
+        if let Some(line) = self.partial_line.take_remainder() {
             self.process_line(&line, notifier);
         }
 

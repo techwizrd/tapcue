@@ -181,7 +181,7 @@ prek run --all-files
 prek run --hook-stage manual --all-files
 ```
 
-Cross-runner integration verification (Rust nextest, Go, npm TAP, Jest JSON, Vitest JSON):
+Cross-runner integration verification (Rust nextest, Go, npm TAP, Jest JSON, Vitest JSON, pytest TAP, unittest TAP):
 
 ```bash
 ./scripts/verify-runner-integrations.sh
@@ -195,6 +195,8 @@ Individual integration checks:
 ./scripts/verify-npm-tap-integration.sh
 ./scripts/verify-jest-integration.sh
 ./scripts/verify-vitest-integration.sh
+./scripts/verify-pytest-integration.sh
+./scripts/verify-unittest-integration.sh
 ```
 
 ## Project docs

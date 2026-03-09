@@ -26,6 +26,8 @@ jobs:
       integration_npm_tap: ${{ steps.filter.outputs.integration_npm_tap }}
       integration_jest_json: ${{ steps.filter.outputs.integration_jest_json }}
       integration_vitest_json: ${{ steps.filter.outputs.integration_vitest_json }}
+      integration_python_pytest: ${{ steps.filter.outputs.integration_python_pytest }}
+      integration_python_unittest: ${{ steps.filter.outputs.integration_python_unittest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -70,10 +72,20 @@ jobs:
               - 'scripts/verify-vitest-integration.sh'
               - 'tests/runner-fixtures/vitest-json/**'
               - '.github/workflows/**'
+            integration_python_pytest:
+              - 'src/**'
+              - 'scripts/verify-pytest-integration.sh'
+              - 'tests/runner-fixtures/python-pytest/**'
+              - '.github/workflows/**'
+            integration_python_unittest:
+              - 'src/**'
+              - 'scripts/verify-unittest-integration.sh'
+              - 'tests/runner-fixtures/python-unittest/**'
+              - '.github/workflows/**'
 
   build-tapcue-debug:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.integration_rust_nextest == 'true' || needs.changes.outputs.integration_go == 'true' || needs.changes.outputs.integration_npm_tap == 'true' || needs.changes.outputs.integration_jest_json == 'true' || needs.changes.outputs.integration_vitest_json == 'true'
+    if: github.event_name != 'pull_request' || needs.changes.outputs.integration_rust_nextest == 'true' || needs.changes.outputs.integration_go == 'true' || needs.changes.outputs.integration_npm_tap == 'true' || needs.changes.outputs.integration_jest_json == 'true' || needs.changes.outputs.integration_vitest_json == 'true' || needs.changes.outputs.integration_python_pytest == 'true' || needs.changes.outputs.integration_python_unittest == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -143,6 +155,15 @@ jobs:
           assert any(line.startswith("> ") for line in lines), "TLDR page must include a description"
           assert any(line.startswith("`") and line.endswith("`") for line in lines), "TLDR page must include at least one command example"
           PY
+
+      - name: Shell script lint
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh
+
+      - name: Validate docs script references
+        run: ./scripts/check-doc-links.sh
 
       - name: Dependency audit
         uses: rustsec/audit-check@v2
@@ -296,6 +317,70 @@ jobs:
           TAPCUE_BIN: ${{ github.workspace }}/bin/tapcue
         run: ./scripts/verify-vitest-integration.sh
 
+  integration-python-pytest:
+    needs: [changes, build-tapcue-debug]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.integration_python_pytest == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Download tapcue debug binary
+        uses: actions/download-artifact@v8
+        with:
+          name: tapcue-debug-bin
+          path: bin
+
+      - name: Ensure tapcue binary is executable
+        run: chmod +x bin/tapcue
+
+      - name: Verify pytest integration
+        env:
+          TAPCUE_BIN: ${{ github.workspace }}/bin/tapcue
+        run: ./scripts/verify-pytest-integration.sh
+
+  integration-python-unittest:
+    needs: [changes, build-tapcue-debug]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.integration_python_unittest == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Download tapcue debug binary
+        uses: actions/download-artifact@v8
+        with:
+          name: tapcue-debug-bin
+          path: bin
+
+      - name: Ensure tapcue binary is executable
+        run: chmod +x bin/tapcue
+
+      - name: Verify unittest integration
+        env:
+          TAPCUE_BIN: ${{ github.workspace }}/bin/tapcue
+        run: ./scripts/verify-unittest-integration.sh
+
   build-release:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -306,6 +391,8 @@ jobs:
       - integration-npm-tap
       - integration-jest-json
       - integration-vitest-json
+      - integration-python-pytest
+      - integration-python-unittest
     permissions:
       contents: write
     steps:

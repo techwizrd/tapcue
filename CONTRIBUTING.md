@@ -39,7 +39,7 @@ Optional benchmark run:
 cargo bench --features benchmarks --bench stream_processing
 ```
 
-Cross-runner integration verification (requires Go, Node.js/npm, cargo-nextest):
+Cross-runner integration verification (requires Go, Node.js/npm, Python, uv, cargo-nextest):
 
 ```bash
 ./scripts/verify-runner-integrations.sh
@@ -53,6 +53,8 @@ Or run individual checks:
 ./scripts/verify-npm-tap-integration.sh
 ./scripts/verify-jest-integration.sh
 ./scripts/verify-vitest-integration.sh
+./scripts/verify-pytest-integration.sh
+./scripts/verify-unittest-integration.sh
 ```
 
 You can also run repository hooks with:
@@ -60,6 +62,13 @@ You can also run repository hooks with:
 ```bash
 prek run --all-files
 prek run --hook-stage manual --all-files
+```
+
+If you update Python fixture dependencies, regenerate lockfiles with hashes:
+
+```bash
+uv pip compile --generate-hashes -o tests/runner-fixtures/python-pytest/requirements.lock tests/runner-fixtures/python-pytest/requirements.txt
+uv pip compile --generate-hashes -o tests/runner-fixtures/python-unittest/requirements.lock tests/runner-fixtures/python-unittest/requirements.txt
 ```
 
 ## Pull requests

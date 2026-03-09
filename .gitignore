@@ -2,6 +2,8 @@
 /tests/runner-fixtures/**/target/
 /tests/runner-fixtures/**/node_modules/
 /tests/runner-fixtures/**/.tap/
+/tests/runner-fixtures/**/__pycache__/
+*.pyc
 PERFORMANCE.md
 
 # Editors

@@ -172,7 +172,13 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked
 cargo bench --features benchmarks --bench stream_processing
-prek run -c .prek/config.toml --all-files
+```
+
+Primary hook runner:
+
+```bash
+prek run --all-files
+prek run --hook-stage manual --all-files
 ```
 
 Cross-runner integration verification (Rust nextest, Go, npm TAP, Jest JSON, Vitest JSON):

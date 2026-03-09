@@ -58,7 +58,8 @@ Or run individual checks:
 You can also run repository hooks with:
 
 ```bash
-prek run -c .prek/config.toml --all-files
+prek run --all-files
+prek run --hook-stage manual --all-files
 ```
 
 ## Pull requests

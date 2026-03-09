@@ -11,7 +11,7 @@
 - bailouts
 - final run summary
 
-It is designed for streaming TAP input and incremental parsing.
+It is designed for streaming TAP input and incremental parsing. 🦀
 
 `tapcue` also supports streaming JSON test output from common tools:
 
@@ -39,6 +39,19 @@ cargo build --release
 ```
 
 The resulting binary is at `target/release/tapcue`.
+
+Install directly from GitHub `main`:
+
+```bash
+cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue
+```
+
+Optional pin/reinstall variants:
+
+```bash
+cargo install --git https://github.com/techwizrd/tapcue --rev <commit-sha> tapcue
+cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue --force
+```
 
 ## CLI flags
 

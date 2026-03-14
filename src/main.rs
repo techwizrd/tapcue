@@ -56,6 +56,7 @@ fn main() -> Result<()> {
         &mut notifier,
         AppConfig {
             quiet_parse_errors: effective_config.quiet_parse_errors,
+            strict: effective_config.strict,
             input_format: effective_config.input_format,
             trace_detection: effective_config.trace_detection,
         },
@@ -417,6 +418,7 @@ mod tests {
     fn sample_config() -> EffectiveConfig {
         EffectiveConfig {
             quiet_parse_errors: false,
+            strict: false,
             no_notify: true,
             desktop_mode: DesktopMode::Auto,
             input_format: InputFormat::Tap,

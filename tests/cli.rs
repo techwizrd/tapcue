@@ -27,6 +27,24 @@ fn cli_returns_non_zero_for_failing_input() {
 }
 
 #[test]
+fn strict_flag_enforces_tap14_failures_without_pragma() {
+    let input = "TAP version 14\n1..1\nthis is invalid\nok 1 - valid test\n";
+
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .write_stdin(input)
+        .assert()
+        .success();
+
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .arg("--strict")
+        .write_stdin(input)
+        .assert()
+        .failure();
+}
+
+#[test]
 fn print_effective_config_outputs_merged_values() {
     let dir = tempdir().expect("temp dir should create");
     let local_cfg = dir.path().join(".tapcue.toml");

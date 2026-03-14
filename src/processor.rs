@@ -40,6 +40,7 @@ pub struct TapStreamProcessor {
     quiet_parse_errors: bool,
     partial_line: LineBuffer,
     strict_mode: bool,
+    strict_enforced: bool,
     in_yaml_block: bool,
     yaml_can_start: bool,
     capturing_subtest: bool,
@@ -58,11 +59,12 @@ pub struct TapStreamProcessor {
 }
 
 impl TapStreamProcessor {
-    pub fn new(quiet_parse_errors: bool) -> Self {
+    pub fn new(quiet_parse_errors: bool, strict_mode: bool) -> Self {
         Self {
             quiet_parse_errors,
             partial_line: LineBuffer::default(),
-            strict_mode: false,
+            strict_mode,
+            strict_enforced: strict_mode,
             in_yaml_block: false,
             yaml_can_start: false,
             capturing_subtest: false,
@@ -240,7 +242,7 @@ impl TapStreamProcessor {
         }
 
         if let Some(pragma) = parse_pragma(trimmed) {
-            if pragma.key.eq_ignore_ascii_case("strict") {
+            if pragma.key.eq_ignore_ascii_case("strict") && !self.strict_enforced {
                 self.strict_mode = pragma.enabled;
             }
             return;
@@ -348,7 +350,8 @@ impl TapStreamProcessor {
         self.capturing_subtest = false;
         let nested_stream = std::mem::take(&mut self.subtest_lines);
 
-        let mut nested_processor = TapStreamProcessor::new(self.quiet_parse_errors);
+        let mut nested_processor =
+            TapStreamProcessor::new(self.quiet_parse_errors, self.strict_enforced);
         nested_processor.strict_mode = self.strict_mode;
 
         let mut sink = NoopNotifier;
@@ -615,7 +618,7 @@ mod tests {
     }
 
     fn process_input(input: &str) -> (RunState, RecordingNotifier) {
-        let mut processor = TapStreamProcessor::new(false);
+        let mut processor = TapStreamProcessor::new(false, false);
         let mut notifier = RecordingNotifier::default();
         processor.ingest(input, &mut notifier);
         processor.finish(&mut notifier);
@@ -670,7 +673,7 @@ mod tests {
 
     #[test]
     fn bailout_is_recorded_once() {
-        let mut processor = TapStreamProcessor::new(false);
+        let mut processor = TapStreamProcessor::new(false, false);
         let mut notifier = RecordingNotifier::default();
 
         processor.ingest("TAP version 14\n1..2\nBail out! stop now", &mut notifier);
@@ -699,7 +702,7 @@ mod tests {
 
     #[test]
     fn streaming_incremental_lines() {
-        let mut processor = TapStreamProcessor::new(false);
+        let mut processor = TapStreamProcessor::new(false, false);
         let mut notifier = RecordingNotifier::default();
 
         processor.ingest("TAP version", &mut notifier);
@@ -715,7 +718,7 @@ mod tests {
 
     #[test]
     fn malformed_then_valid_tap_is_processed() {
-        let mut processor = TapStreamProcessor::new(false);
+        let mut processor = TapStreamProcessor::new(false, false);
         let mut notifier = RecordingNotifier::default();
 
         processor.ingest("TAP version 14\n1..1\nnot", &mut notifier);
@@ -745,6 +748,20 @@ mod tests {
         let input = "TAP version 14\npragma +strict\n1..1\nthis is invalid\n";
         let (state, _notifier) = process_input(input);
 
+        assert_eq!(state.protocol_failures, 1);
+        assert!(!state.is_success());
+    }
+
+    #[test]
+    fn enforced_strict_mode_ignores_pragma_minus_strict() {
+        let input = "TAP version 14\npragma -strict\n1..1\nthis is invalid\nok 1 - still counted\n";
+        let mut processor = TapStreamProcessor::new(false, true);
+        let mut notifier = RecordingNotifier::default();
+
+        processor.ingest(input, &mut notifier);
+        processor.finish(&mut notifier);
+
+        let state = processor.into_state();
         assert_eq!(state.protocol_failures, 1);
         assert!(!state.is_success());
     }
@@ -792,7 +809,7 @@ mod tests {
 
     #[test]
     fn escaped_sequences_are_unescaped_in_labels_and_bailouts() {
-        let mut processor = TapStreamProcessor::new(false);
+        let mut processor = TapStreamProcessor::new(false, false);
         let mut notifier = RecordingNotifier::default();
 
         processor

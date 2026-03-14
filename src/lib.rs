@@ -27,6 +27,7 @@ const MAX_AUTO_DETECTION_BUFFER: usize = 64 * 1024;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AppConfig {
     pub quiet_parse_errors: bool,
+    pub strict: bool,
     pub input_format: InputFormat,
     pub trace_detection: bool,
 }
@@ -44,9 +45,10 @@ pub fn process_stream<R: Read>(
     let mut buffered_reader = BufReader::with_capacity(16 * 1024, reader);
     let mut line_buf = Vec::with_capacity(256);
     let mut selected = match config.input_format {
-        InputFormat::Tap => {
-            Some(StreamProcessor::Tap(TapStreamProcessor::new(config.quiet_parse_errors)))
-        }
+        InputFormat::Tap => Some(StreamProcessor::Tap(TapStreamProcessor::new(
+            config.quiet_parse_errors,
+            config.strict,
+        ))),
         InputFormat::Json => {
             Some(StreamProcessor::Json(JsonStreamProcessor::new(config.quiet_parse_errors)))
         }
@@ -74,9 +76,10 @@ pub fn process_stream<R: Read>(
                 eprintln!("tapcue: auto-detected input format: {}", format.as_str());
             }
             let mut processor = match format {
-                InputFormat::Tap => {
-                    StreamProcessor::Tap(TapStreamProcessor::new(config.quiet_parse_errors))
-                }
+                InputFormat::Tap => StreamProcessor::Tap(TapStreamProcessor::new(
+                    config.quiet_parse_errors,
+                    config.strict,
+                )),
                 InputFormat::Json => {
                     StreamProcessor::Json(JsonStreamProcessor::new(config.quiet_parse_errors))
                 }
@@ -96,9 +99,10 @@ pub fn process_stream<R: Read>(
             }
 
             let mut processor = match fallback {
-                InputFormat::Tap => {
-                    StreamProcessor::Tap(TapStreamProcessor::new(config.quiet_parse_errors))
-                }
+                InputFormat::Tap => StreamProcessor::Tap(TapStreamProcessor::new(
+                    config.quiet_parse_errors,
+                    config.strict,
+                )),
                 InputFormat::Json => {
                     StreamProcessor::Json(JsonStreamProcessor::new(config.quiet_parse_errors))
                 }
@@ -118,9 +122,10 @@ pub fn process_stream<R: Read>(
         }
 
         match default_format {
-            InputFormat::Tap => {
-                StreamProcessor::Tap(TapStreamProcessor::new(config.quiet_parse_errors))
-            }
+            InputFormat::Tap => StreamProcessor::Tap(TapStreamProcessor::new(
+                config.quiet_parse_errors,
+                config.strict,
+            )),
             InputFormat::Json => {
                 StreamProcessor::Json(JsonStreamProcessor::new(config.quiet_parse_errors))
             }
@@ -307,6 +312,7 @@ mod tests {
             &mut notifier,
             AppConfig {
                 quiet_parse_errors: false,
+                strict: false,
                 input_format: crate::config::InputFormat::Auto,
                 trace_detection: false,
             },
@@ -327,6 +333,7 @@ mod tests {
             &mut notifier,
             AppConfig {
                 quiet_parse_errors: false,
+                strict: false,
                 input_format: crate::config::InputFormat::Tap,
                 trace_detection: true,
             },
@@ -350,6 +357,7 @@ mod tests {
             &mut notifier,
             AppConfig {
                 quiet_parse_errors: false,
+                strict: false,
                 input_format: crate::config::InputFormat::Auto,
                 trace_detection: true,
             },
@@ -399,6 +407,7 @@ mod tests {
             &mut notifier,
             AppConfig {
                 quiet_parse_errors: false,
+                strict: false,
                 input_format: crate::config::InputFormat::Auto,
                 trace_detection: false,
             },

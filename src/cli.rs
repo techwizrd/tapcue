@@ -14,6 +14,13 @@ pub struct Cli {
     pub quiet_parse_errors: bool,
 
     #[arg(
+        long = "strict",
+        action = ArgAction::SetTrue,
+        help = "Enforce TAP14 strict mode regardless of pragma"
+    )]
+    pub strict: bool,
+
+    #[arg(
         long = "no-quiet-parse-errors",
         action = ArgAction::SetTrue,
         conflicts_with = "quiet_parse_errors",
@@ -144,6 +151,7 @@ mod tests {
         let cli = Cli::parse_from([
             "tapcue",
             "--quiet-parse-errors",
+            "--strict",
             "--notify",
             "--desktop",
             "force-on",
@@ -163,6 +171,7 @@ mod tests {
         ]);
 
         assert!(cli.quiet_parse_errors);
+        assert!(cli.strict);
         assert!(cli.notify);
         assert_eq!(cli.desktop, Some(CliDesktopMode::ForceOn));
         assert_eq!(cli.format, Some(CliInputFormat::Json));

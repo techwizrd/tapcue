@@ -110,6 +110,7 @@ pub enum SummaryFormat {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct EffectiveConfig {
     pub quiet_parse_errors: bool,
+    pub strict: bool,
     pub no_notify: bool,
     pub desktop_mode: DesktopMode,
     pub input_format: InputFormat,
@@ -124,6 +125,7 @@ impl Default for EffectiveConfig {
     fn default() -> Self {
         Self {
             quiet_parse_errors: false,
+            strict: false,
             no_notify: false,
             desktop_mode: DesktopMode::Auto,
             input_format: InputFormat::Auto,
@@ -151,6 +153,7 @@ struct FileConfig {
 #[derive(Debug, Default, Deserialize)]
 struct ParserConfig {
     quiet_parse_errors: Option<bool>,
+    strict: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -225,6 +228,10 @@ impl EffectiveConfig {
 
         if let Some(value) = file_config.parser.quiet_parse_errors {
             self.quiet_parse_errors = value;
+        }
+
+        if let Some(value) = file_config.parser.strict {
+            self.strict = value;
         }
 
         if let Some(value) = file_config.notifications.enabled {
@@ -345,6 +352,10 @@ impl EffectiveConfig {
             self.quiet_parse_errors = false;
         }
 
+        if cli.strict {
+            self.strict = true;
+        }
+
         if cli.no_notify {
             self.no_notify = true;
             if let Some(sources) = notification_sources.as_deref_mut() {
@@ -397,7 +408,10 @@ impl EffectiveConfig {
 
     pub fn to_pretty_toml(&self) -> Result<String> {
         let rendered = RenderedConfig {
-            parser: RenderedParserConfig { quiet_parse_errors: self.quiet_parse_errors },
+            parser: RenderedParserConfig {
+                quiet_parse_errors: self.quiet_parse_errors,
+                strict: self.strict,
+            },
             input: RenderedInputConfig { format: self.input_format },
             notifications: RenderedNotificationsConfig {
                 enabled: !self.no_notify,
@@ -440,6 +454,7 @@ struct RenderedConfig {
 #[derive(Serialize)]
 struct RenderedParserConfig {
     quiet_parse_errors: bool,
+    strict: bool,
 }
 
 #[derive(Serialize)]
@@ -592,6 +607,7 @@ mod tests {
     fn cli_overrides_supported_values() {
         let mut cfg = EffectiveConfig {
             quiet_parse_errors: false,
+            strict: false,
             no_notify: true,
             desktop_mode: DesktopMode::ForceOff,
             input_format: InputFormat::Tap,
@@ -604,6 +620,7 @@ mod tests {
 
         let cli = Cli {
             quiet_parse_errors: true,
+            strict: true,
             no_quiet_parse_errors: false,
             no_notify: false,
             notify: true,
@@ -622,6 +639,7 @@ mod tests {
         cfg.merge_cli(&cli);
 
         assert!(cfg.quiet_parse_errors);
+        assert!(cfg.strict);
         assert!(!cfg.no_notify);
         assert_eq!(cfg.desktop_mode, DesktopMode::Auto);
         assert_eq!(cfg.input_format, InputFormat::Json);
@@ -656,6 +674,7 @@ mod tests {
 
         let cli = Cli {
             quiet_parse_errors: true,
+            strict: false,
             no_quiet_parse_errors: false,
             no_notify: true,
             notify: false,
@@ -695,6 +714,7 @@ mod tests {
 
         let cli = Cli {
             quiet_parse_errors: false,
+            strict: false,
             no_quiet_parse_errors: true,
             no_notify: false,
             notify: false,
@@ -786,6 +806,7 @@ mod tests {
     fn effective_config_renders_user_facing_shape() {
         let cfg = EffectiveConfig {
             quiet_parse_errors: true,
+            strict: true,
             no_notify: false,
             desktop_mode: DesktopMode::ForceOn,
             input_format: InputFormat::Json,
@@ -799,6 +820,7 @@ mod tests {
         let rendered = cfg.to_pretty_toml().expect("render should succeed");
         assert!(rendered.contains("[parser]"));
         assert!(rendered.contains("quiet_parse_errors = true"));
+        assert!(rendered.contains("strict = true"));
         assert!(rendered.contains("[input]"));
         assert!(rendered.contains("format = \"json\""));
         assert!(rendered.contains("[notifications]"));
@@ -824,6 +846,7 @@ mod tests {
 
         let cli = Cli {
             quiet_parse_errors: false,
+            strict: false,
             no_quiet_parse_errors: false,
             no_notify: true,
             notify: false,

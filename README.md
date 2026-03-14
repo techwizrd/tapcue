@@ -57,6 +57,7 @@ cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue --f
 
 - `--quiet-parse-errors`: suppress parse warnings for malformed TAP
 - `--no-quiet-parse-errors`: force parse warnings on
+- `--strict`: enforce TAP14 strict mode even if test output has `pragma -strict`
 - `--no-notify`: disable desktop notifications (useful in CI/tests)
 - `--notify`: force desktop notifications on
 - `--desktop <auto|force-on|force-off>`: override desktop notification detection
@@ -102,6 +103,7 @@ Example `.tapcue.toml`:
 ```toml
 [parser]
 quiet_parse_errors = false
+strict = false
 
 [input]
 format = "auto"

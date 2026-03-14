@@ -45,7 +45,7 @@ proptest! {
         let input = String::from_utf8_lossy(&bytes).into_owned();
 
         let mut notifier = RecordingNotifier::default();
-        let mut parser = TapStreamProcessor::new(true);
+        let mut parser = TapStreamProcessor::new(true, false);
 
         ingest_text_chunks(&input, &chunk_sizes, |chunk| {
             parser.ingest(chunk, &mut notifier);
@@ -87,6 +87,7 @@ proptest! {
         let input = String::from_utf8_lossy(&bytes).into_owned();
         let config = AppConfig {
             quiet_parse_errors: true,
+            strict: false,
             input_format: InputFormat::Tap,
             trace_detection: false,
         };
@@ -111,6 +112,7 @@ proptest! {
         let input = String::from_utf8_lossy(&bytes).into_owned();
         let config = AppConfig {
             quiet_parse_errors: true,
+            strict: false,
             input_format: InputFormat::Json,
             trace_detection: false,
         };
@@ -134,7 +136,7 @@ proptest! {
         let input = render_tap_case(&outcomes);
         let mut notifier = RecordingNotifier::default();
 
-        let mut parser = TapStreamProcessor::new(true);
+        let mut parser = TapStreamProcessor::new(true, false);
         parser.ingest(&input, &mut notifier);
         parser.finish(&mut notifier);
         let state = parser.into_state();

@@ -433,14 +433,15 @@ fn parse_version_line(line: &str) -> Option<bool> {
 
 fn parse_bailout(line: &str) -> Option<Cow<'_, str>> {
     let prefix = "Bail out!";
-    if line.len() < prefix.len() {
+    let Some(head) = line.get(..prefix.len()) else {
         return None;
-    }
-    if !line[..prefix.len()].eq_ignore_ascii_case(prefix) {
+    };
+
+    if !head.eq_ignore_ascii_case(prefix) {
         return None;
     }
 
-    let reason = line[prefix.len()..].trim();
+    let reason = line.get(prefix.len()..).unwrap_or("").trim();
     Some(unescape_text(reason))
 }
 

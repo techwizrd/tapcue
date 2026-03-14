@@ -202,7 +202,7 @@ fn is_tap_plan_line(line: &str) -> bool {
 mod tests {
     use std::io::Read;
 
-    use crate::notifier::Notifier;
+    use crate::notifier::{FailureNotification, Notifier};
 
     use super::{detect_auto_format, fallback_format, process_stream, AppConfig, RunState};
 
@@ -213,7 +213,7 @@ mod tests {
     }
 
     impl Notifier for RecordingNotifier {
-        fn notify_failure(&mut self, _label: &str) {
+        fn notify_failure(&mut self, _failure: &FailureNotification) {
             self.failures += 1;
         }
 

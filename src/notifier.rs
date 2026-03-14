@@ -6,8 +6,77 @@ use std::process::Command;
 use crate::config::DesktopMode;
 use crate::processor::RunState;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FailureSource {
+    Tap,
+    Go,
+    Nextest,
+    Jest,
+    Vitest,
+}
+
+impl FailureSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Tap => "TAP",
+            Self::Go => "go",
+            Self::Nextest => "nextest",
+            Self::Jest => "jest",
+            Self::Vitest => "vitest",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailureNotification {
+    pub source: FailureSource,
+    pub label: String,
+    pub suite: Option<String>,
+    pub test_file: Option<String>,
+    pub reason: Option<String>,
+}
+
+impl FailureNotification {
+    pub fn new(source: FailureSource, label: impl Into<String>) -> Self {
+        Self { source, label: label.into(), suite: None, test_file: None, reason: None }
+    }
+
+    pub fn dedup_key(&self) -> String {
+        format!(
+            "{}|{}|{}|{}|{}",
+            self.source.as_str(),
+            self.label,
+            self.suite.as_deref().unwrap_or(""),
+            self.test_file.as_deref().unwrap_or(""),
+            self.reason.as_deref().unwrap_or(""),
+        )
+    }
+
+    pub fn render_body(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!("Runner: {}", self.source.as_str()));
+
+        if let Some(suite) = self.suite.as_deref().filter(|value| !value.trim().is_empty()) {
+            lines.push(format!("Suite: {suite}"));
+        }
+
+        if let Some(test_file) = self.test_file.as_deref().filter(|value| !value.trim().is_empty())
+        {
+            lines.push(format!("File: {test_file}"));
+        }
+
+        lines.push(format!("Test: {}", self.label));
+
+        if let Some(reason) = self.reason.as_deref().filter(|value| !value.trim().is_empty()) {
+            lines.push(format!("Reason: {reason}"));
+        }
+
+        lines.join("\n")
+    }
+}
+
 pub trait Notifier {
-    fn notify_failure(&mut self, label: &str);
+    fn notify_failure(&mut self, failure: &FailureNotification);
     fn notify_bailout(&mut self, reason: &str);
     fn notify_summary(&mut self, state: &RunState);
 }
@@ -36,16 +105,17 @@ impl<'a> PolicyNotifier<'a> {
         Self { inner, policy, seen_failures: HashSet::new(), emitted_failure_notifications: 0 }
     }
 
-    fn can_emit_failure(&mut self, label: &str) -> bool {
+    fn can_emit_failure(&mut self, failure: &FailureNotification) -> bool {
         const MAX_TRACKED_FAILURE_LABELS: usize = 4096;
+        let dedup_key = failure.dedup_key();
 
         if self.policy.dedup_failures {
-            if self.seen_failures.contains(label) {
+            if self.seen_failures.contains(&dedup_key) {
                 return false;
             }
 
             if self.seen_failures.len() < MAX_TRACKED_FAILURE_LABELS {
-                self.seen_failures.insert(label.to_owned());
+                self.seen_failures.insert(dedup_key);
             }
         }
 
@@ -61,9 +131,9 @@ impl<'a> PolicyNotifier<'a> {
 }
 
 impl Notifier for PolicyNotifier<'_> {
-    fn notify_failure(&mut self, label: &str) {
-        if self.can_emit_failure(label) {
-            self.inner.notify_failure(label);
+    fn notify_failure(&mut self, failure: &FailureNotification) {
+        if self.can_emit_failure(failure) {
+            self.inner.notify_failure(failure);
         }
     }
 
@@ -80,7 +150,7 @@ impl Notifier for PolicyNotifier<'_> {
 pub struct NullNotifier;
 
 impl Notifier for NullNotifier {
-    fn notify_failure(&mut self, _label: &str) {}
+    fn notify_failure(&mut self, _failure: &FailureNotification) {}
 
     fn notify_bailout(&mut self, _reason: &str) {}
 
@@ -96,6 +166,14 @@ enum Platform {
     #[cfg(any(target_os = "windows", test))]
     Windows,
     Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NotificationKind {
+    Failure,
+    Bailout,
+    SummarySuccess,
+    SummaryFailure,
 }
 
 fn current_platform() -> Platform {
@@ -307,7 +385,7 @@ fn command_exists_at(directory: &Path, command: &str) -> bool {
 }
 
 trait NotificationSender {
-    fn send(&self, title: &str, body: &str) -> Result<(), String>;
+    fn send(&self, kind: NotificationKind, title: &str, body: &str) -> Result<(), String>;
 }
 
 #[derive(Debug)]
@@ -320,8 +398,43 @@ impl ShellNotificationSender {
         Self { platform }
     }
 
-    fn send_linux(&self, title: &str, body: &str) -> Result<(), String> {
+    fn send_linux(&self, kind: NotificationKind, title: &str, body: &str) -> Result<(), String> {
+        let (urgency, icon, expire_ms, stack_key, category) = match kind {
+            NotificationKind::Failure => (
+                "normal",
+                "dialog-warning-symbolic",
+                "12000",
+                "tapcue-failure",
+                "tapcue.test.failure",
+            ),
+            NotificationKind::Bailout => {
+                ("critical", "dialog-error-symbolic", "0", "tapcue-bailout", "tapcue.test.bailout")
+            }
+            NotificationKind::SummarySuccess => {
+                ("normal", "emblem-ok-symbolic", "5000", "tapcue-summary", "tapcue.test.summary")
+            }
+            NotificationKind::SummaryFailure => (
+                "normal",
+                "dialog-warning-symbolic",
+                "9000",
+                "tapcue-summary",
+                "tapcue.test.summary",
+            ),
+        };
+
         Command::new("notify-send")
+            .arg("--app-name")
+            .arg("tapcue")
+            .arg("--category")
+            .arg(category)
+            .arg("--urgency")
+            .arg(urgency)
+            .arg("--icon")
+            .arg(icon)
+            .arg("--expire-time")
+            .arg(expire_ms)
+            .arg("--hint")
+            .arg(format!("string:x-canonical-private-synchronous:{stack_key}"))
             .arg(title)
             .arg(body)
             .status()
@@ -386,10 +499,10 @@ impl ShellNotificationSender {
 }
 
 impl NotificationSender for ShellNotificationSender {
-    fn send(&self, title: &str, body: &str) -> Result<(), String> {
+    fn send(&self, kind: NotificationKind, title: &str, body: &str) -> Result<(), String> {
         match self.platform {
             #[cfg(any(target_os = "linux", test))]
-            Platform::Linux => self.send_linux(title, body),
+            Platform::Linux => self.send_linux(kind, title, body),
             #[cfg(any(target_os = "macos", test))]
             Platform::MacOs => self.send_macos(title, body),
             #[cfg(any(target_os = "windows", test))]
@@ -435,24 +548,26 @@ impl DesktopNotifier {
         Self { enabled, sender }
     }
 
-    fn send_notification(&self, title: &str, body: &str) {
+    fn send_notification(&self, kind: NotificationKind, title: &str, body: &str) {
         if !self.enabled {
             return;
         }
 
-        if let Err(error) = self.sender.send(title, body) {
+        if let Err(error) = self.sender.send(kind, title, body) {
             eprintln!("tapcue: failed to send desktop notification: {error}");
         }
     }
 }
 
 impl Notifier for DesktopNotifier {
-    fn notify_failure(&mut self, label: &str) {
-        self.send_notification("TAP failure", label);
+    fn notify_failure(&mut self, failure: &FailureNotification) {
+        let title = format!("{} failure", failure.source.as_str());
+        let body = failure.render_body();
+        self.send_notification(NotificationKind::Failure, &title, &body);
     }
 
     fn notify_bailout(&mut self, reason: &str) {
-        self.send_notification("TAP bailout", reason);
+        self.send_notification(NotificationKind::Bailout, "TAP bailout", reason);
     }
 
     fn notify_summary(&mut self, state: &RunState) {
@@ -461,7 +576,12 @@ impl Notifier for DesktopNotifier {
             "status: {status}; total: {}; passed: {}; failed: {}; todo: {}; skipped: {}",
             state.total, state.passed, state.failed, state.todo, state.skipped
         );
-        self.send_notification("TAP summary", &body);
+        let kind = if state.is_success() {
+            NotificationKind::SummarySuccess
+        } else {
+            NotificationKind::SummaryFailure
+        };
+        self.send_notification(kind, "TAP summary", &body);
     }
 }
 
@@ -473,8 +593,8 @@ mod tests {
 
     use super::{
         build_doctor_report, desktop_notifications_available, DesktopNotifier, Environment,
-        LinuxEnvironmentStatus, NotificationDoctorSignals, NotificationPolicy, NotificationSender,
-        Platform, PolicyNotifier,
+        FailureNotification, FailureSource, LinuxEnvironmentStatus, NotificationDoctorSignals,
+        NotificationKind, NotificationPolicy, NotificationSender, Platform, PolicyNotifier,
     };
     use crate::config::DesktopMode;
     use crate::notifier::Notifier;
@@ -505,7 +625,7 @@ mod tests {
         notifications: Arc<Mutex<Notifications>>,
     }
 
-    type Notifications = Vec<(String, String)>;
+    type Notifications = Vec<(NotificationKind, String, String)>;
 
     impl RecordingSender {
         fn shared() -> (Self, Arc<Mutex<Notifications>>) {
@@ -515,11 +635,12 @@ mod tests {
     }
 
     impl NotificationSender for RecordingSender {
-        fn send(&self, title: &str, body: &str) -> Result<(), String> {
-            self.notifications
-                .lock()
-                .expect("lock should not be poisoned")
-                .push((title.to_owned(), body.to_owned()));
+        fn send(&self, _kind: NotificationKind, title: &str, body: &str) -> Result<(), String> {
+            self.notifications.lock().expect("lock should not be poisoned").push((
+                _kind,
+                title.to_owned(),
+                body.to_owned(),
+            ));
             Ok(())
         }
     }
@@ -528,7 +649,7 @@ mod tests {
     struct FailingSender;
 
     impl NotificationSender for FailingSender {
-        fn send(&self, _title: &str, _body: &str) -> Result<(), String> {
+        fn send(&self, _kind: NotificationKind, _title: &str, _body: &str) -> Result<(), String> {
             Err("boom".to_owned())
         }
     }
@@ -580,7 +701,7 @@ mod tests {
             Box::new(sender),
         );
 
-        notifier.notify_failure("boom");
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "boom"));
         notifier.notify_bailout("stopped");
         notifier.notify_summary(&sample_state());
 
@@ -597,18 +718,22 @@ mod tests {
             Box::new(sender),
         );
 
-        notifier.notify_failure("alpha");
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "alpha"));
         notifier.notify_bailout("catastrophic");
         notifier.notify_summary(&sample_state());
 
         let notifications = shared.lock().expect("lock should not be poisoned");
         assert_eq!(notifications.len(), 3);
-        assert_eq!(notifications[0].0, "TAP failure");
-        assert_eq!(notifications[0].1, "alpha");
-        assert_eq!(notifications[1].0, "TAP bailout");
-        assert_eq!(notifications[1].1, "catastrophic");
-        assert_eq!(notifications[2].0, "TAP summary");
-        assert!(notifications[2].1.contains("status: failure"));
+        assert_eq!(notifications[0].0, NotificationKind::Failure);
+        assert_eq!(notifications[0].1, "TAP failure");
+        assert!(notifications[0].2.contains("Runner: TAP"));
+        assert!(notifications[0].2.contains("Test: alpha"));
+        assert_eq!(notifications[1].0, NotificationKind::Bailout);
+        assert_eq!(notifications[1].1, "TAP bailout");
+        assert_eq!(notifications[1].2, "catastrophic");
+        assert_eq!(notifications[2].0, NotificationKind::SummaryFailure);
+        assert_eq!(notifications[2].1, "TAP summary");
+        assert!(notifications[2].2.contains("status: failure"));
     }
 
     #[test]
@@ -620,7 +745,7 @@ mod tests {
             Box::new(FakeEnvironment::new(&[])),
             Box::new(sender_on),
         );
-        force_on.notify_failure("forced");
+        force_on.notify_failure(&FailureNotification::new(FailureSource::Tap, "forced"));
         assert_eq!(shared_on.lock().expect("lock should not be poisoned").len(), 1);
 
         let (sender_off, shared_off) = RecordingSender::shared();
@@ -630,7 +755,7 @@ mod tests {
             Box::new(FakeEnvironment::new(&[("DISPLAY", ":0")])),
             Box::new(sender_off),
         );
-        force_off.notify_failure("suppressed");
+        force_off.notify_failure(&FailureNotification::new(FailureSource::Tap, "suppressed"));
         assert!(shared_off.lock().expect("lock should not be poisoned").is_empty());
     }
 
@@ -647,15 +772,30 @@ mod tests {
             NotificationPolicy { dedup_failures: true, max_failure_notifications: Some(2) };
         let mut notifier = PolicyNotifier::new(&mut desktop, policy);
 
-        notifier.notify_failure("one");
-        notifier.notify_failure("one");
-        notifier.notify_failure("two");
-        notifier.notify_failure("three");
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "one"));
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "one"));
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "two"));
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "three"));
 
         let notifications = shared.lock().expect("lock should not be poisoned");
         assert_eq!(notifications.len(), 2);
-        assert_eq!(notifications[0].1, "one");
-        assert_eq!(notifications[1].1, "two");
+        assert!(notifications[0].2.contains("Test: one"));
+        assert!(notifications[1].2.contains("Test: two"));
+    }
+
+    #[test]
+    fn failure_body_uses_clean_multiline_layout() {
+        let mut failure = FailureNotification::new(FailureSource::Go, "TestHTTP");
+        failure.suite = Some("pkg/server".to_owned());
+        failure.test_file = Some("server/http_test.go".to_owned());
+        failure.reason = Some("expected 200, got 500".to_owned());
+
+        let rendered = failure.render_body();
+        assert!(rendered.contains("Runner: go"));
+        assert!(rendered.contains("Suite: pkg/server"));
+        assert!(rendered.contains("File: server/http_test.go"));
+        assert!(rendered.contains("Test: TestHTTP"));
+        assert!(rendered.contains("Reason: expected 200, got 500"));
     }
 
     #[test]
@@ -672,9 +812,9 @@ mod tests {
             NotificationPolicy { dedup_failures: false, max_failure_notifications: Some(3) },
         );
 
-        notifier.notify_failure("same");
-        notifier.notify_failure("same");
-        notifier.notify_failure("same");
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "same"));
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "same"));
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "same"));
 
         let notifications = shared.lock().expect("lock should not be poisoned");
         assert_eq!(notifications.len(), 3);
@@ -689,7 +829,7 @@ mod tests {
             Box::new(FailingSender),
         );
 
-        notifier.notify_failure("alpha");
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "alpha"));
         notifier.notify_bailout("stop");
         notifier.notify_summary(&sample_state());
     }
@@ -708,8 +848,8 @@ mod tests {
             NotificationPolicy { dedup_failures: false, max_failure_notifications: Some(0) },
         );
 
-        notifier.notify_failure("one");
-        notifier.notify_failure("two");
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "one"));
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "two"));
 
         assert!(shared.lock().expect("lock should not be poisoned").is_empty());
     }
@@ -730,8 +870,40 @@ mod tests {
 
         let notifications = shared.lock().expect("lock should not be poisoned");
         assert_eq!(notifications.len(), 2);
-        assert_eq!(notifications[0].0, "TAP bailout");
-        assert_eq!(notifications[1].0, "TAP summary");
+        assert_eq!(notifications[0].0, NotificationKind::Bailout);
+        assert_eq!(notifications[0].1, "TAP bailout");
+        assert_eq!(notifications[1].0, NotificationKind::SummaryFailure);
+        assert_eq!(notifications[1].1, "TAP summary");
+    }
+
+    #[test]
+    fn successful_summary_uses_success_kind() {
+        let (sender, shared) = RecordingSender::shared();
+        let mut notifier = DesktopNotifier::with_components(
+            Platform::Linux,
+            DesktopMode::ForceOn,
+            Box::new(FakeEnvironment::new(&[])),
+            Box::new(sender),
+        );
+
+        let state = RunState {
+            planned: Some(1),
+            total: 1,
+            passed: 1,
+            failed: 0,
+            todo: 0,
+            skipped: 0,
+            bailout_reason: None,
+            parse_warning_count: 0,
+            protocol_failures: 0,
+        };
+
+        notifier.notify_summary(&state);
+
+        let notifications = shared.lock().expect("lock should not be poisoned");
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].0, NotificationKind::SummarySuccess);
+        assert_eq!(notifications[0].1, "TAP summary");
     }
 
     #[test]
@@ -749,9 +921,12 @@ mod tests {
         );
 
         for i in 0..4200 {
-            notifier.notify_failure(&format!("label-{i}"));
+            notifier.notify_failure(&FailureNotification::new(
+                FailureSource::Tap,
+                format!("label-{i}"),
+            ));
         }
-        notifier.notify_failure("label-4097");
+        notifier.notify_failure(&FailureNotification::new(FailureSource::Tap, "label-4097"));
 
         let notifications = shared.lock().expect("lock should not be poisoned");
         assert_eq!(notifications.len(), 4201);

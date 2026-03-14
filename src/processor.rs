@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use serde::Serialize;
 
 use crate::line_buffer::LineBuffer;
-use crate::notifier::Notifier;
+use crate::notifier::{FailureNotification, FailureSource, Notifier};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RunState {
@@ -322,7 +322,10 @@ impl TapStreamProcessor {
             }
             None => {
                 self.state.failed += 1;
-                notifier.notify_failure(test.desc.as_deref().unwrap_or("unnamed test"));
+                let label = test.desc.as_deref().unwrap_or("unnamed test");
+                let mut failure = FailureNotification::new(FailureSource::Tap, label);
+                failure.reason = Some(label.to_owned());
+                notifier.notify_failure(&failure);
             }
         }
     }
@@ -381,7 +384,7 @@ impl TapStreamProcessor {
 struct NoopNotifier;
 
 impl Notifier for NoopNotifier {
-    fn notify_failure(&mut self, _label: &str) {}
+    fn notify_failure(&mut self, _failure: &FailureNotification) {}
 
     fn notify_bailout(&mut self, _reason: &str) {}
 
@@ -578,18 +581,20 @@ fn unescape_text(input: &str) -> Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
-    use crate::notifier::Notifier;
+    use crate::notifier::{FailureNotification, Notifier};
 
     use super::{RunState, TapStreamProcessor};
 
     #[derive(Debug, Default)]
     struct RecordingNotifier {
+        failures: Vec<FailureNotification>,
         events: Vec<String>,
     }
 
     impl Notifier for RecordingNotifier {
-        fn notify_failure(&mut self, label: &str) {
-            self.events.push(format!("failure:{label}"));
+        fn notify_failure(&mut self, failure: &FailureNotification) {
+            self.failures.push(failure.clone());
+            self.events.push(format!("failure:{}", failure.label));
         }
 
         fn notify_bailout(&mut self, reason: &str) {
@@ -637,6 +642,8 @@ mod tests {
         assert_eq!(state.failed, 1);
         assert!(!state.is_success());
         assert!(notifier.events.contains(&"failure:boom".to_owned()));
+        assert_eq!(notifier.failures[0].source.as_str(), "TAP");
+        assert_eq!(notifier.failures[0].reason.as_deref(), Some("boom"));
     }
 
     #[test]
@@ -719,6 +726,7 @@ mod tests {
         assert_eq!(state.total, 1);
         assert_eq!(state.failed, 1);
         assert!(notifier.events.iter().any(|event| event == "failure:later valid"));
+        assert_eq!(notifier.failures[0].reason.as_deref(), Some("later valid"));
     }
 
     #[test]

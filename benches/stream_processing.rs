@@ -3,14 +3,14 @@ use std::io::Read;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
-use tapcue::notifier::Notifier;
+use tapcue::notifier::{FailureNotification, Notifier};
 use tapcue::{process_stream, AppConfig};
 
 #[derive(Default)]
 struct NullBenchNotifier;
 
 impl Notifier for NullBenchNotifier {
-    fn notify_failure(&mut self, _label: &str) {}
+    fn notify_failure(&mut self, _failure: &FailureNotification) {}
 
     fn notify_bailout(&mut self, _reason: &str) {}
 

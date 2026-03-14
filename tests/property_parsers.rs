@@ -1,7 +1,7 @@
 use proptest::prelude::*;
 use tapcue::config::InputFormat;
 use tapcue::json_stream::JsonStreamProcessor;
-use tapcue::notifier::Notifier;
+use tapcue::notifier::{FailureNotification, Notifier};
 use tapcue::processor::{RunState, TapStreamProcessor};
 use tapcue::{process_stream, AppConfig};
 
@@ -19,7 +19,7 @@ struct RecordingNotifier {
 }
 
 impl Notifier for RecordingNotifier {
-    fn notify_failure(&mut self, _label: &str) {
+    fn notify_failure(&mut self, _failure: &FailureNotification) {
         self.failures += 1;
     }
 

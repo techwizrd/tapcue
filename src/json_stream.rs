@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::line_buffer::LineBuffer;
-use crate::notifier::Notifier;
+use crate::notifier::{FailureNotification, FailureSource, Notifier};
 use crate::processor::RunState;
 
 #[derive(Debug)]
@@ -114,6 +114,8 @@ impl JsonStreamProcessor {
             .and_then(Value::as_str)
             .or_else(|| value.get("Package").and_then(Value::as_str))
             .unwrap_or("unknown");
+        let suite = value.get("Package").and_then(Value::as_str);
+        let reason = value.get("Output").and_then(Value::as_str);
 
         match action {
             "pass" => {
@@ -123,7 +125,7 @@ impl JsonStreamProcessor {
             }
             "fail" => {
                 if has_test {
-                    self.record_failure(label, notifier);
+                    self.record_failure(FailureSource::Go, label, suite, None, reason, notifier);
                 }
             }
             "skip" => {
@@ -153,10 +155,33 @@ impl JsonStreamProcessor {
             .and_then(Value::as_str)
             .or_else(|| value.get("test").and_then(Value::as_str))
             .unwrap_or("unknown");
+        let suite = value
+            .get("binary_id")
+            .and_then(Value::as_str)
+            .or_else(|| value.get("package").and_then(Value::as_str));
+        let test_file = value.get("test_binary").and_then(Value::as_str);
+        let reason = value
+            .get("message")
+            .and_then(Value::as_str)
+            .or_else(|| value.get("error").and_then(Value::as_str))
+            .or_else(|| {
+                value
+                    .get("event")
+                    .and_then(Value::as_object)
+                    .and_then(|event| event.get("message"))
+                    .and_then(Value::as_str)
+            });
 
         match event_name {
             "passed" | "ok" => self.record_pass(),
-            "failed" => self.record_failure(label, notifier),
+            "failed" => self.record_failure(
+                FailureSource::Nextest,
+                label,
+                suite,
+                test_file,
+                reason,
+                notifier,
+            ),
             "ignored" | "skipped" => self.record_skip(),
             "todo" => self.record_todo(),
             _ => {}
@@ -184,7 +209,11 @@ impl JsonStreamProcessor {
                 self.state.skipped = pending.unwrap_or(0);
                 self.state.todo = todo.unwrap_or(0);
 
-                self.collect_failed_labels(object.get("testResults"), notifier);
+                self.collect_failed_labels(
+                    object.get("testResults"),
+                    FailureSource::Jest,
+                    notifier,
+                );
                 return true;
             }
 
@@ -198,7 +227,11 @@ impl JsonStreamProcessor {
                     self.state.passed = passed.unwrap_or(0);
                     self.state.failed = failed.unwrap_or(0);
                     self.state.skipped = skipped.unwrap_or(0);
-                    self.collect_failed_labels(object.get("testResults"), notifier);
+                    self.collect_failed_labels(
+                        object.get("testResults"),
+                        FailureSource::Vitest,
+                        notifier,
+                    );
                     return true;
                 }
             }
@@ -207,12 +240,22 @@ impl JsonStreamProcessor {
         false
     }
 
-    fn collect_failed_labels(&mut self, test_results: Option<&Value>, notifier: &mut dyn Notifier) {
+    fn collect_failed_labels(
+        &mut self,
+        test_results: Option<&Value>,
+        source: FailureSource,
+        notifier: &mut dyn Notifier,
+    ) {
         let Some(entries) = test_results.and_then(Value::as_array) else {
             return;
         };
 
         for entry in entries {
+            let suite_name = entry
+                .get("name")
+                .and_then(Value::as_str)
+                .or_else(|| entry.get("title").and_then(Value::as_str));
+
             if let Some(assertions) = entry.get("assertionResults").and_then(Value::as_array) {
                 for assertion in assertions {
                     if assertion.get("status").and_then(Value::as_str) == Some("failed") {
@@ -221,7 +264,22 @@ impl JsonStreamProcessor {
                             .and_then(Value::as_str)
                             .or_else(|| assertion.get("title").and_then(Value::as_str))
                             .unwrap_or("failed assertion");
-                        notifier.notify_failure(label);
+                        let reason = first_non_empty_string(&[
+                            assertion
+                                .get("failureMessages")
+                                .and_then(Value::as_array)
+                                .and_then(|messages| messages.first())
+                                .and_then(Value::as_str),
+                            assertion.get("failureMessage").and_then(Value::as_str),
+                            entry.get("message").and_then(Value::as_str),
+                            Some(label),
+                        ]);
+                        let mut failure = FailureNotification::new(source, label);
+                        failure.suite = suite_name.map(str::to_owned);
+                        failure.test_file =
+                            entry.get("name").and_then(Value::as_str).map(str::to_owned);
+                        failure.reason = reason.map(short_reason);
+                        notifier.notify_failure(&failure);
                     }
                 }
             } else if entry.get("status").and_then(Value::as_str) == Some("failed") {
@@ -230,7 +288,16 @@ impl JsonStreamProcessor {
                     .and_then(Value::as_str)
                     .or_else(|| entry.get("title").and_then(Value::as_str))
                     .unwrap_or("failed test suite");
-                notifier.notify_failure(label);
+                let reason = first_non_empty_string(&[
+                    entry.get("message").and_then(Value::as_str),
+                    entry.get("failureMessage").and_then(Value::as_str),
+                    Some(label),
+                ]);
+                let mut failure = FailureNotification::new(source, label);
+                failure.suite = suite_name.map(str::to_owned);
+                failure.test_file = entry.get("name").and_then(Value::as_str).map(str::to_owned);
+                failure.reason = reason.map(short_reason);
+                notifier.notify_failure(&failure);
             }
         }
     }
@@ -241,11 +308,23 @@ impl JsonStreamProcessor {
         self.state.passed += 1;
     }
 
-    fn record_failure(&mut self, label: &str, notifier: &mut dyn Notifier) {
+    fn record_failure(
+        &mut self,
+        source: FailureSource,
+        label: &str,
+        suite: Option<&str>,
+        test_file: Option<&str>,
+        reason: Option<&str>,
+        notifier: &mut dyn Notifier,
+    ) {
         self.observed_test_events = true;
         self.state.total += 1;
         self.state.failed += 1;
-        notifier.notify_failure(label);
+        let mut failure = FailureNotification::new(source, label);
+        failure.suite = suite.map(str::to_owned);
+        failure.test_file = test_file.map(str::to_owned);
+        failure.reason = Some(short_reason(reason.unwrap_or(label)));
+        notifier.notify_failure(&failure);
     }
 
     fn record_skip(&mut self) {
@@ -297,22 +376,51 @@ fn nextest_event_name(value: &Value) -> &str {
     "unknown"
 }
 
+fn first_non_empty_string<'a>(candidates: &[Option<&'a str>]) -> Option<&'a str> {
+    for candidate in candidates {
+        if let Some(value) = candidate {
+            if !value.trim().is_empty() {
+                return Some(value);
+            }
+        }
+    }
+
+    None
+}
+
+fn short_reason(raw: &str) -> String {
+    const LIMIT: usize = 160;
+
+    let first_line = raw.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("unknown");
+
+    let mut shortened = String::new();
+    for (index, ch) in first_line.chars().enumerate() {
+        if index >= LIMIT {
+            shortened.push_str("...");
+            return shortened;
+        }
+        shortened.push(ch);
+    }
+
+    shortened
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::notifier::Notifier;
+    use crate::notifier::{FailureNotification, Notifier};
 
     use super::JsonStreamProcessor;
     use crate::processor::RunState;
 
     #[derive(Default)]
     struct RecordingNotifier {
-        failures: Vec<String>,
+        failures: Vec<FailureNotification>,
         summaries: usize,
     }
 
     impl Notifier for RecordingNotifier {
-        fn notify_failure(&mut self, label: &str) {
-            self.failures.push(label.to_owned());
+        fn notify_failure(&mut self, failure: &FailureNotification) {
+            self.failures.push(failure.clone());
         }
 
         fn notify_bailout(&mut self, _reason: &str) {}
@@ -333,7 +441,8 @@ mod tests {
         let state = processor.into_state();
         assert_eq!(state.total, 2);
         assert_eq!(state.failed, 1);
-        assert_eq!(notifier.failures, vec!["TestB".to_owned()]);
+        assert_eq!(notifier.failures[0].label, "TestB");
+        assert_eq!(notifier.failures[0].source.as_str(), "go");
     }
 
     #[test]
@@ -409,7 +518,8 @@ mod tests {
         let state = processor.into_state();
         assert_eq!(state.total, 1);
         assert_eq!(state.failed, 1);
-        assert_eq!(notifier.failures, vec!["crate::failing".to_owned()]);
+        assert_eq!(notifier.failures[0].label, "crate::failing");
+        assert_eq!(notifier.failures[0].source.as_str(), "nextest");
     }
 
     #[test]
@@ -456,7 +566,8 @@ mod tests {
 
         let state = processor.into_state();
         assert_eq!(state.failed, 1);
-        assert_eq!(notifier.failures, vec!["suite-name".to_owned()]);
+        assert_eq!(notifier.failures[0].label, "suite-name");
+        assert_eq!(notifier.failures[0].source.as_str(), "jest");
     }
 
     #[test]
@@ -510,7 +621,8 @@ mod tests {
 
         let state = processor.into_state();
         assert_eq!(state.failed, 1);
-        assert_eq!(notifier.failures, vec!["suite should fail".to_owned()]);
+        assert_eq!(notifier.failures[0].label, "suite should fail");
+        assert_eq!(notifier.failures[0].source.as_str(), "jest");
     }
 
     #[test]

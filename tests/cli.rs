@@ -144,3 +144,29 @@ fn invalid_config_file_fails_with_context() {
         .failure()
         .stderr(predicates::str::contains("failed to parse TOML config file"));
 }
+
+#[test]
+fn doctor_runs_without_input() {
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--doctor")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("doctor:"))
+        .stdout(predicates::str::contains("ready"))
+        .stdout(predicates::str::contains("settings:"))
+        .stdout(predicates::str::contains("notifications.enabled"));
+}
+
+#[test]
+fn doctor_explains_cli_disabled_notifications() {
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--doctor")
+        .arg("--no-notify")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("action needed"))
+        .stdout(predicates::str::contains("notifications.enabled"))
+        .stdout(predicates::str::contains("(source: cli)"))
+        .stdout(predicates::str::contains("reasons:"))
+        .stdout(predicates::str::contains("disabled by merged configuration"));
+}

@@ -19,6 +19,47 @@ use crate::cli::Cli;
 
 const LOCAL_CONFIG_NAME: &str = ".tapcue.toml";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigSource {
+    Default,
+    UserConfig,
+    LocalConfig,
+    Environment,
+    Cli,
+}
+
+impl ConfigSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::UserConfig => "user-config",
+            Self::LocalConfig => "local-config",
+            Self::Environment => "environment",
+            Self::Cli => "cli",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotificationConfigSources {
+    pub enabled: ConfigSource,
+    pub desktop: ConfigSource,
+}
+
+impl Default for NotificationConfigSources {
+    fn default() -> Self {
+        Self { enabled: ConfigSource::Default, desktop: ConfigSource::Default }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigPathInfo {
+    pub user_config_path: Option<PathBuf>,
+    pub user_config_exists: bool,
+    pub local_config_path: PathBuf,
+    pub local_config_exists: bool,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DesktopMode {
@@ -26,6 +67,16 @@ pub enum DesktopMode {
     Auto,
     ForceOn,
     ForceOff,
+}
+
+impl DesktopMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::ForceOn => "force-on",
+            Self::ForceOff => "force-off",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -123,27 +174,53 @@ struct OutputConfig {
 
 impl EffectiveConfig {
     pub fn load(cli: &Cli) -> Result<Self> {
-        let mut merged = EffectiveConfig::default();
-
-        if let Some(path) = user_config_path() {
-            merged.merge_file(&path)?;
-        }
-
-        merged.merge_file(Path::new(LOCAL_CONFIG_NAME))?;
-        merged.merge_env();
-        merged.merge_cli(cli);
-
-        Ok(merged)
+        let (effective, _) = Self::load_with_sources(cli)?;
+        Ok(effective)
     }
 
+    pub fn load_with_sources(cli: &Cli) -> Result<(Self, NotificationConfigSources)> {
+        let mut merged = EffectiveConfig::default();
+        let mut notification_sources = NotificationConfigSources::default();
+
+        if let Some(path) = user_config_path() {
+            merged.merge_file_internal(
+                &path,
+                Some(ConfigSource::UserConfig),
+                Some(&mut notification_sources),
+            )?;
+        }
+
+        merged.merge_file_internal(
+            Path::new(LOCAL_CONFIG_NAME),
+            Some(ConfigSource::LocalConfig),
+            Some(&mut notification_sources),
+        )?;
+        merged.merge_env_internal(Some(&mut notification_sources));
+        merged.merge_cli_internal(cli, Some(&mut notification_sources));
+
+        Ok((merged, notification_sources))
+    }
+
+    #[cfg(test)]
     fn merge_file(&mut self, path: &Path) -> Result<()> {
+        self.merge_file_internal(path, None, None)
+    }
+
+    fn merge_file_internal(
+        &mut self,
+        path: &Path,
+        source: Option<ConfigSource>,
+        notification_sources: Option<&mut NotificationConfigSources>,
+    ) -> Result<()> {
         if !path.exists() {
             return Ok(());
         }
 
-        let source = fs::read_to_string(path)
+        let mut notification_sources = notification_sources;
+
+        let raw_source = fs::read_to_string(path)
             .with_context(|| format!("failed to read config file {}", path.display()))?;
-        let file_config: FileConfig = toml::from_str(&source)
+        let file_config: FileConfig = toml::from_str(&raw_source)
             .with_context(|| format!("failed to parse TOML config file {}", path.display()))?;
 
         if let Some(value) = file_config.parser.quiet_parse_errors {
@@ -152,10 +229,16 @@ impl EffectiveConfig {
 
         if let Some(value) = file_config.notifications.enabled {
             self.no_notify = !value;
+            if let (Some(source), Some(sources)) = (source, notification_sources.as_deref_mut()) {
+                sources.enabled = source;
+            }
         }
 
         if let Some(value) = file_config.notifications.desktop {
             self.desktop_mode = value;
+            if let (Some(source), Some(sources)) = (source, notification_sources.as_deref_mut()) {
+                sources.desktop = source;
+            }
         }
 
         if let Some(value) = file_config.notifications.dedup_failures {
@@ -181,21 +264,37 @@ impl EffectiveConfig {
         Ok(())
     }
 
+    #[cfg(test)]
     fn merge_env(&mut self) {
+        self.merge_env_internal(None);
+    }
+
+    fn merge_env_internal(&mut self, notification_sources: Option<&mut NotificationConfigSources>) {
+        let mut notification_sources = notification_sources;
+
         if let Some(value) = read_env_bool("TAPCUE_QUIET_PARSE_ERRORS") {
             self.quiet_parse_errors = value;
         }
 
         if let Some(value) = read_env_bool("TAPCUE_NO_NOTIFY") {
             self.no_notify = value;
+            if let Some(sources) = notification_sources.as_deref_mut() {
+                sources.enabled = ConfigSource::Environment;
+            }
         }
 
         if let Some(value) = read_env_bool("TAPCUE_NOTIFICATIONS_ENABLED") {
             self.no_notify = !value;
+            if let Some(sources) = notification_sources.as_deref_mut() {
+                sources.enabled = ConfigSource::Environment;
+            }
         }
 
         if let Some(value) = read_env_desktop_mode("TAPCUE_DESKTOP") {
             self.desktop_mode = value;
+            if let Some(sources) = notification_sources.as_deref_mut() {
+                sources.desktop = ConfigSource::Environment;
+            }
         }
 
         if let Some(value) = read_env_input_format("TAPCUE_FORMAT") {
@@ -226,7 +325,18 @@ impl EffectiveConfig {
         }
     }
 
+    #[cfg(test)]
     fn merge_cli(&mut self, cli: &Cli) {
+        self.merge_cli_internal(cli, None);
+    }
+
+    fn merge_cli_internal(
+        &mut self,
+        cli: &Cli,
+        notification_sources: Option<&mut NotificationConfigSources>,
+    ) {
+        let mut notification_sources = notification_sources;
+
         if cli.quiet_parse_errors {
             self.quiet_parse_errors = true;
         }
@@ -237,14 +347,23 @@ impl EffectiveConfig {
 
         if cli.no_notify {
             self.no_notify = true;
+            if let Some(sources) = notification_sources.as_deref_mut() {
+                sources.enabled = ConfigSource::Cli;
+            }
         }
 
         if cli.notify {
             self.no_notify = false;
+            if let Some(sources) = notification_sources.as_deref_mut() {
+                sources.enabled = ConfigSource::Cli;
+            }
         }
 
         if let Some(value) = cli.desktop {
             self.desktop_mode = value.into();
+            if let Some(sources) = notification_sources.as_deref_mut() {
+                sources.desktop = ConfigSource::Cli;
+            }
         }
 
         if let Some(value) = cli.format {
@@ -293,6 +412,20 @@ impl EffectiveConfig {
         };
 
         toml::to_string_pretty(&rendered).context("failed to render effective config as TOML")
+    }
+}
+
+pub fn resolved_config_paths() -> ConfigPathInfo {
+    let user_path = user_config_path();
+    let user_exists = user_path.as_ref().is_some_and(|path| path.exists());
+    let local_path = PathBuf::from(LOCAL_CONFIG_NAME);
+    let local_exists = local_path.exists();
+
+    ConfigPathInfo {
+        user_config_path: user_path,
+        user_config_exists: user_exists,
+        local_config_path: local_path,
+        local_config_exists: local_exists,
     }
 }
 
@@ -404,7 +537,10 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{DesktopMode, EffectiveConfig, InputFormat, SummaryFormat};
+    use super::{
+        ConfigSource, DesktopMode, EffectiveConfig, InputFormat, NotificationConfigSources,
+        SummaryFormat,
+    };
     use crate::cli::Cli;
 
     fn env_lock() -> &'static Mutex<()> {
@@ -481,6 +617,7 @@ mod tests {
             trace_detection: true,
             validate_config: false,
             print_effective_config: false,
+            doctor: false,
         };
         cfg.merge_cli(&cli);
 
@@ -532,6 +669,7 @@ mod tests {
             trace_detection: false,
             validate_config: false,
             print_effective_config: false,
+            doctor: false,
         };
 
         let mut cfg = EffectiveConfig::default();
@@ -570,6 +708,7 @@ mod tests {
             trace_detection: false,
             validate_config: false,
             print_effective_config: false,
+            doctor: false,
         };
         cfg.merge_cli(&cli);
         assert!(!cfg.quiet_parse_errors);
@@ -670,5 +809,47 @@ mod tests {
         assert!(rendered.contains("summary_file = \"out.json\""));
         assert!(rendered.contains("enabled = true"));
         assert!(rendered.contains("desktop = \"force-on\""));
+    }
+
+    #[test]
+    fn notification_source_tracking_follows_precedence() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let dir = tempdir().expect("temp dir should create");
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "[notifications]\nenabled = false\ndesktop = \"force-on\"\n")
+            .expect("config file should write");
+
+        let _env_notify = ScopedEnv::set("TAPCUE_NO_NOTIFY", "false");
+        let _env_desktop = ScopedEnv::set("TAPCUE_DESKTOP", "force-off");
+
+        let cli = Cli {
+            quiet_parse_errors: false,
+            no_quiet_parse_errors: false,
+            no_notify: true,
+            notify: false,
+            desktop: Some(crate::cli::CliDesktopMode::Auto),
+            format: None,
+            summary_format: None,
+            summary_file: None,
+            dedup_failures: false,
+            no_dedup_failures: false,
+            max_failure_notifications: None,
+            trace_detection: false,
+            validate_config: false,
+            print_effective_config: false,
+            doctor: false,
+        };
+
+        let mut cfg = EffectiveConfig::default();
+        let mut sources = NotificationConfigSources::default();
+        cfg.merge_file_internal(&path, Some(ConfigSource::UserConfig), Some(&mut sources))
+            .expect("config should parse");
+        cfg.merge_env_internal(Some(&mut sources));
+        cfg.merge_cli_internal(&cli, Some(&mut sources));
+
+        assert!(cfg.no_notify);
+        assert_eq!(cfg.desktop_mode, DesktopMode::Auto);
+        assert_eq!(sources.enabled, ConfigSource::Cli);
+        assert_eq!(sources.desktop, ConfigSource::Cli);
     }
 }

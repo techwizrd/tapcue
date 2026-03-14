@@ -10,4 +10,5 @@
 
 - Check `README.md` for CLI/configuration details.
 - Run with `--print-effective-config` to verify active settings.
+- Run with `--doctor` to inspect notification readiness and disable reasons.
 - Include TAP input sample and exact command when possible.

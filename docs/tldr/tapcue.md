@@ -26,3 +26,7 @@
 - Print merged runtime config and exit:
 
 `tapcue --print-effective-config`
+
+- Check desktop notification readiness and disabled-notification reasons:
+
+`tapcue --doctor`

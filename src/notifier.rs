@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::ffi::OsString;
+use std::path::Path;
 use std::process::Command;
 
 use crate::config::DesktopMode;
@@ -144,6 +145,165 @@ fn desktop_notifications_available(platform: Platform, env: &dyn Environment) ->
         Platform::Windows => true,
         Platform::Other => false,
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinuxEnvironmentStatus {
+    pub display: bool,
+    pub wayland_display: bool,
+    pub dbus_session_bus_address: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationDoctorReport {
+    pub ready: bool,
+    pub notifications_enabled: bool,
+    pub desktop_mode: DesktopMode,
+    pub platform: &'static str,
+    pub backend_command: Option<&'static str>,
+    pub backend_found: bool,
+    pub auto_environment_ready: bool,
+    pub linux_environment: Option<LinuxEnvironmentStatus>,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NotificationDoctorSignals {
+    platform: Platform,
+    linux_environment: LinuxEnvironmentStatus,
+    backend_found: bool,
+}
+
+pub fn doctor_notifications(no_notify: bool, mode: DesktopMode) -> NotificationDoctorReport {
+    let platform = current_platform();
+    let signals = NotificationDoctorSignals {
+        platform,
+        linux_environment: LinuxEnvironmentStatus {
+            display: std::env::var_os("DISPLAY").is_some(),
+            wayland_display: std::env::var_os("WAYLAND_DISPLAY").is_some(),
+            dbus_session_bus_address: std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some(),
+        },
+        backend_found: backend_command_for_platform(platform).is_some_and(command_in_path),
+    };
+
+    build_doctor_report(no_notify, mode, signals)
+}
+
+fn build_doctor_report(
+    no_notify: bool,
+    mode: DesktopMode,
+    signals: NotificationDoctorSignals,
+) -> NotificationDoctorReport {
+    let notifications_enabled = !no_notify;
+    let auto_environment_ready = match signals.platform {
+        #[cfg(any(target_os = "linux", test))]
+        Platform::Linux => {
+            signals.linux_environment.display
+                || signals.linux_environment.wayland_display
+                || signals.linux_environment.dbus_session_bus_address
+        }
+        #[cfg(any(target_os = "macos", test))]
+        Platform::MacOs => true,
+        #[cfg(any(target_os = "windows", test))]
+        Platform::Windows => true,
+        Platform::Other => false,
+    };
+
+    let mut reasons = Vec::new();
+    if !notifications_enabled {
+        reasons.push("notifications are disabled by merged configuration".to_owned());
+    }
+
+    if mode == DesktopMode::ForceOff {
+        reasons.push("desktop mode is force-off".to_owned());
+    }
+
+    if notifications_enabled && mode == DesktopMode::Auto && !auto_environment_ready {
+        reasons.push("desktop auto-detection did not find an active desktop session".to_owned());
+    }
+
+    if notifications_enabled && mode != DesktopMode::ForceOff {
+        if let Some(command) = backend_command_for_platform(signals.platform) {
+            if !signals.backend_found {
+                reasons.push(format!("notification backend command not found in PATH: {command}"));
+            }
+        } else {
+            reasons.push("unsupported platform for desktop notifications".to_owned());
+        }
+    }
+
+    NotificationDoctorReport {
+        ready: reasons.is_empty(),
+        notifications_enabled,
+        desktop_mode: mode,
+        platform: platform_name(signals.platform),
+        backend_command: backend_command_for_platform(signals.platform),
+        backend_found: signals.backend_found,
+        auto_environment_ready,
+        linux_environment: match signals.platform {
+            #[cfg(any(target_os = "linux", test))]
+            Platform::Linux => Some(signals.linux_environment),
+            _ => None,
+        },
+        reasons,
+    }
+}
+
+fn backend_command_for_platform(platform: Platform) -> Option<&'static str> {
+    match platform {
+        #[cfg(any(target_os = "linux", test))]
+        Platform::Linux => Some("notify-send"),
+        #[cfg(any(target_os = "macos", test))]
+        Platform::MacOs => Some("osascript"),
+        #[cfg(any(target_os = "windows", test))]
+        Platform::Windows => Some("powershell"),
+        Platform::Other => None,
+    }
+}
+
+fn platform_name(platform: Platform) -> &'static str {
+    match platform {
+        #[cfg(any(target_os = "linux", test))]
+        Platform::Linux => "linux",
+        #[cfg(any(target_os = "macos", test))]
+        Platform::MacOs => "macos",
+        #[cfg(any(target_os = "windows", test))]
+        Platform::Windows => "windows",
+        Platform::Other => "other",
+    }
+}
+
+fn command_in_path(command: &str) -> bool {
+    let Some(path_value) = std::env::var_os("PATH") else {
+        return false;
+    };
+
+    for directory in std::env::split_paths(&path_value) {
+        if command_exists_at(&directory, command) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn command_exists_at(directory: &Path, command: &str) -> bool {
+    let unix_candidate = directory.join(command);
+    if unix_candidate.is_file() {
+        return true;
+    }
+
+    #[cfg(windows)]
+    {
+        for extension in ["exe", "cmd", "bat"] {
+            let candidate = directory.join(format!("{command}.{extension}"));
+            if candidate.is_file() {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 trait NotificationSender {
@@ -312,8 +472,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::{
-        desktop_notifications_available, DesktopNotifier, Environment, NotificationPolicy,
-        NotificationSender, Platform, PolicyNotifier,
+        build_doctor_report, desktop_notifications_available, DesktopNotifier, Environment,
+        LinuxEnvironmentStatus, NotificationDoctorSignals, NotificationPolicy, NotificationSender,
+        Platform, PolicyNotifier,
     };
     use crate::config::DesktopMode;
     use crate::notifier::Notifier;
@@ -594,5 +755,65 @@ mod tests {
 
         let notifications = shared.lock().expect("lock should not be poisoned");
         assert_eq!(notifications.len(), 4201);
+    }
+
+    #[test]
+    fn doctor_reports_not_ready_when_notifications_are_disabled() {
+        let report = build_doctor_report(
+            true,
+            DesktopMode::Auto,
+            NotificationDoctorSignals {
+                platform: Platform::Linux,
+                linux_environment: LinuxEnvironmentStatus {
+                    display: true,
+                    wayland_display: false,
+                    dbus_session_bus_address: false,
+                },
+                backend_found: true,
+            },
+        );
+
+        assert!(!report.ready);
+        assert!(report.reasons.iter().any(|reason| reason.contains("disabled")));
+    }
+
+    #[test]
+    fn doctor_reports_not_ready_when_linux_auto_detection_fails() {
+        let report = build_doctor_report(
+            false,
+            DesktopMode::Auto,
+            NotificationDoctorSignals {
+                platform: Platform::Linux,
+                linux_environment: LinuxEnvironmentStatus {
+                    display: false,
+                    wayland_display: false,
+                    dbus_session_bus_address: false,
+                },
+                backend_found: true,
+            },
+        );
+
+        assert!(!report.ready);
+        assert!(report.reasons.iter().any(|reason| reason.contains("auto-detection")));
+    }
+
+    #[test]
+    fn doctor_reports_not_ready_when_backend_command_is_missing() {
+        let report = build_doctor_report(
+            false,
+            DesktopMode::ForceOn,
+            NotificationDoctorSignals {
+                platform: Platform::Linux,
+                linux_environment: LinuxEnvironmentStatus {
+                    display: true,
+                    wayland_display: false,
+                    dbus_session_bus_address: false,
+                },
+                backend_found: false,
+            },
+        );
+
+        assert!(!report.ready);
+        assert!(report.reasons.iter().any(|reason| reason.contains("PATH")));
     }
 }

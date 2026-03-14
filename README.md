@@ -68,6 +68,7 @@ cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue --f
 - `--trace-detection`: print auto format detection decisions
 - `--validate-config`: validate merged config and exit
 - `--print-effective-config`: print merged config and exit
+- `--doctor`: check desktop notification readiness and explain why notifications are disabled
 
 ## Configuration
 
@@ -150,6 +151,8 @@ To inspect the final merged settings at runtime:
 
 ```bash
 tapcue --print-effective-config
+
+tapcue --doctor
 ```
 
 For complete CLI documentation, run:

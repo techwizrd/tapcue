@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::io::IsTerminal;
 use std::io::Write;
 use std::path::Path;
 
@@ -7,16 +8,24 @@ use anyhow::Result;
 use clap::Parser;
 
 use tapcue::cli::Cli;
-use tapcue::config::{EffectiveConfig, SummaryFormat};
+use tapcue::config::{
+    resolved_config_paths, EffectiveConfig, NotificationConfigSources, SummaryFormat,
+};
 use tapcue::notifier::{
-    DesktopNotifier, NotificationPolicy, Notifier, NullNotifier, PolicyNotifier,
+    doctor_notifications, DesktopNotifier, NotificationPolicy, Notifier, NullNotifier,
+    PolicyNotifier,
 };
 use tapcue::processor::RunState;
 use tapcue::{process_stream, AppConfig};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let effective_config = EffectiveConfig::load(&cli)?;
+    let (effective_config, notification_sources) = EffectiveConfig::load_with_sources(&cli)?;
+
+    if cli.doctor {
+        emit_doctor(&effective_config, &notification_sources);
+        return Ok(());
+    }
 
     if cli.print_effective_config {
         let rendered = effective_config.to_pretty_toml()?;
@@ -58,6 +67,272 @@ fn main() -> Result<()> {
         Ok(())
     } else {
         std::process::exit(1);
+    }
+}
+
+fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
+    let report = doctor_notifications(config.no_notify, config.desktop_mode);
+    let paths = resolved_config_paths();
+    let color = DoctorColor::detect();
+
+    let status =
+        if report.ready { color.green("✓ ready") } else { color.red("✗ action needed") };
+    println!("doctor: {status}");
+
+    print_section("settings");
+    print_state_row(
+        &color,
+        report.notifications_enabled,
+        "notifications.enabled",
+        &format!("{} (source: {})", report.notifications_enabled, sources.enabled.as_str()),
+    );
+    print_state_row(
+        &color,
+        true,
+        "notifications.desktop",
+        &format!("{} (source: {})", report.desktop_mode.as_str(), sources.desktop.as_str()),
+    );
+    print_neutral_row(&color, "platform", report.platform);
+
+    print_section("checks");
+    let check_notifications_enabled = report.notifications_enabled;
+    print_check_row(
+        &color,
+        "notifications_enabled",
+        check_notifications_enabled,
+        if check_notifications_enabled { "pass" } else { "fail" },
+    );
+
+    let check_desktop_mode = report.desktop_mode != tapcue::config::DesktopMode::ForceOff;
+    print_check_row(
+        &color,
+        "desktop_mode_allows_notifications",
+        check_desktop_mode,
+        if check_desktop_mode { "pass" } else { "fail (desktop mode is force-off)" },
+    );
+
+    let check_auto_environment = if report.desktop_mode == tapcue::config::DesktopMode::Auto {
+        report.auto_environment_ready
+    } else {
+        true
+    };
+    print_check_row(
+        &color,
+        "desktop_environment_ready",
+        check_auto_environment,
+        if report.desktop_mode == tapcue::config::DesktopMode::Auto {
+            if check_auto_environment {
+                "pass"
+            } else {
+                "fail"
+            }
+        } else {
+            "pass (not required in force mode)"
+        },
+    );
+
+    let check_backend_available = report.backend_command.is_some() && report.backend_found;
+    print_check_row(
+        &color,
+        "backend_available",
+        check_backend_available,
+        if check_backend_available { "pass" } else { "fail" },
+    );
+    if let Some(linux_env) = report.linux_environment {
+        print_section("env");
+        if report.auto_environment_ready {
+            print_ok_row(&color, "auto.environment_ready", "true");
+        } else {
+            print_warn_row(&color, "auto.environment_ready", "false");
+        }
+        print_neutral_row(&color, "env.DISPLAY", if linux_env.display { "set" } else { "unset" });
+        print_neutral_row(
+            &color,
+            "env.WAYLAND_DISPLAY",
+            if linux_env.wayland_display { "set" } else { "unset" },
+        );
+        print_neutral_row(
+            &color,
+            "env.DBUS_SESSION_BUS_ADDRESS",
+            if linux_env.dbus_session_bus_address { "set" } else { "unset" },
+        );
+    }
+    print_section("backend");
+    if let Some(command) = report.backend_command {
+        print_neutral_row(&color, "backend.command", command);
+    } else {
+        print_neutral_row(&color, "backend.command", "none");
+    }
+    if report.backend_found {
+        print_ok_row(&color, "backend.found", "true");
+    } else {
+        print_warn_row(&color, "backend.found", "false");
+    }
+    print_section("config");
+
+    if let Some(path) = paths.user_config_path {
+        print_neutral_row(
+            &color,
+            "config.user",
+            &format!(
+                "{} ({})",
+                path.display(),
+                if paths.user_config_exists { "found" } else { "missing" }
+            ),
+        );
+    } else {
+        print_neutral_row(&color, "config.user", "unavailable");
+    }
+    print_neutral_row(
+        &color,
+        "config.local",
+        &format!(
+            "{} ({})",
+            paths.local_config_path.display(),
+            if paths.local_config_exists { "found" } else { "missing" }
+        ),
+    );
+    let mut fixes = suggested_fixes(config, &report);
+    if !fixes.is_empty() {
+        print_section("fixes");
+        for (index, fix) in fixes.drain(..).enumerate() {
+            print_neutral_row(&color, &format!("fix.{}", index + 1), &fix);
+        }
+    }
+
+    if !report.reasons.is_empty() {
+        print_section("reasons");
+        for reason in report.reasons {
+            print_fail_row(&color, "reason", &reason);
+        }
+    }
+}
+
+fn print_section(title: &str) {
+    println!("{title}:");
+}
+
+fn print_check_row(color: &DoctorColor, key: &str, passed: bool, value: &str) {
+    if passed {
+        print_ok_row(color, key, value);
+    } else {
+        print_fail_row(color, key, value);
+    }
+}
+
+fn print_state_row(color: &DoctorColor, good: bool, key: &str, value: &str) {
+    if good {
+        print_ok_row(color, key, value);
+    } else {
+        print_warn_row(color, key, value);
+    }
+}
+
+fn print_ok_row(color: &DoctorColor, key: &str, value: &str) {
+    print_row(color.green("✓"), key, value);
+}
+
+fn print_warn_row(color: &DoctorColor, key: &str, value: &str) {
+    print_row(color.yellow("!"), key, value);
+}
+
+fn print_fail_row(color: &DoctorColor, key: &str, value: &str) {
+    print_row(color.red("✗"), key, value);
+}
+
+fn print_neutral_row(_color: &DoctorColor, key: &str, value: &str) {
+    print_row("-".to_owned(), key, value);
+}
+
+fn print_row(icon: String, key: &str, value: &str) {
+    const KEY_WIDTH: usize = 33;
+    let dotted_key = format!("{key:.<KEY_WIDTH$}");
+    println!("  {icon} {dotted_key} {value}");
+}
+
+fn suggested_fixes(
+    config: &EffectiveConfig,
+    report: &tapcue::notifier::NotificationDoctorReport,
+) -> Vec<String> {
+    let mut fixes = Vec::new();
+
+    if config.no_notify {
+        fixes.push(
+            "Enable notifications: remove --no-notify, set TAPCUE_NO_NOTIFY=false, or set notifications.enabled=true"
+                .to_owned(),
+        );
+    }
+
+    if config.desktop_mode == tapcue::config::DesktopMode::ForceOff {
+        fixes.push(
+            "Use --desktop auto or --desktop force-on (or set notifications.desktop in config)"
+                .to_owned(),
+        );
+    }
+
+    if config.desktop_mode == tapcue::config::DesktopMode::Auto && !report.auto_environment_ready {
+        fixes.push(
+            "Start from a desktop session with DISPLAY/WAYLAND_DISPLAY/DBUS_SESSION_BUS_ADDRESS available"
+                .to_owned(),
+        );
+    }
+
+    if !report.backend_found {
+        match report.backend_command {
+            Some("notify-send") => fixes.push(
+                "Install notify-send (usually package: libnotify-bin) and ensure it is in PATH"
+                    .to_owned(),
+            ),
+            Some("osascript") => fixes.push(
+                "Ensure osascript is available (standard macOS install) and present in PATH"
+                    .to_owned(),
+            ),
+            Some("powershell") => fixes.push(
+                "Install PowerShell (or restore powershell.exe) and ensure it is in PATH"
+                    .to_owned(),
+            ),
+            Some(other) => fixes.push(format!(
+                "Install backend command '{other}' and ensure it is discoverable in PATH"
+            )),
+            None => fixes.push(
+                "Use --no-notify on unsupported platforms or add a platform-specific backend"
+                    .to_owned(),
+            ),
+        }
+    }
+
+    fixes
+}
+
+#[derive(Clone, Copy)]
+struct DoctorColor {
+    enabled: bool,
+}
+
+impl DoctorColor {
+    fn detect() -> Self {
+        let no_color = std::env::var_os("NO_COLOR").is_some();
+        Self { enabled: !no_color && io::stdout().is_terminal() }
+    }
+
+    fn green(self, text: &str) -> String {
+        self.paint(text, "32")
+    }
+
+    fn red(self, text: &str) -> String {
+        self.paint(text, "31")
+    }
+
+    fn yellow(self, text: &str) -> String {
+        self.paint(text, "33")
+    }
+
+    fn paint(self, text: &str, code: &str) -> String {
+        if self.enabled {
+            format!("\x1b[{code}m{text}\x1b[0m")
+        } else {
+            text.to_owned()
+        }
     }
 }
 

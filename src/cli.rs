@@ -76,6 +76,9 @@ pub struct Cli {
 
     #[arg(long, default_value_t = false, help = "Print effective merged configuration and exit")]
     pub print_effective_config: bool,
+
+    #[arg(long, default_value_t = false, help = "Check notification readiness and config sources")]
+    pub doctor: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -156,6 +159,7 @@ mod tests {
             "--trace-detection",
             "--validate-config",
             "--print-effective-config",
+            "--doctor",
         ]);
 
         assert!(cli.quiet_parse_errors);
@@ -169,6 +173,7 @@ mod tests {
         assert!(cli.trace_detection);
         assert!(cli.validate_config);
         assert!(cli.print_effective_config);
+        assert!(cli.doctor);
     }
 
     #[test]

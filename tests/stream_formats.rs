@@ -54,6 +54,15 @@ fn auto_detects_tap_output_from_npm_test() {
 }
 
 #[test]
+fn auto_detects_bun_default_output() {
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .write_stdin(fixture("bun_default.txt"))
+        .assert()
+        .failure();
+}
+
+#[test]
 fn forced_json_mode_is_permissive_with_noise_lines() {
     let input = "npm notice something\n{\"Action\":\"pass\",\"Test\":\"Alpha\"}\n";
 

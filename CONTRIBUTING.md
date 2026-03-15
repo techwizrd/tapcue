@@ -39,7 +39,7 @@ Optional benchmark run:
 cargo bench --features benchmarks --bench stream_processing
 ```
 
-Cross-runner integration verification (requires Go, Node.js/npm, Python, uv, cargo-nextest):
+Cross-runner integration verification (requires Go, Node.js/npm, Bun, Python, uv, cargo-nextest):
 
 ```bash
 ./scripts/verify-runner-integrations.sh
@@ -51,6 +51,7 @@ Or run individual checks:
 ./scripts/verify-nextest-integration.sh
 ./scripts/verify-go-integration.sh
 ./scripts/verify-npm-tap-integration.sh
+./scripts/verify-bun-integration.sh
 ./scripts/verify-jest-integration.sh
 ./scripts/verify-vitest-integration.sh
 ./scripts/verify-pytest-integration.sh

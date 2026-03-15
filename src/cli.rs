@@ -143,6 +143,7 @@ pub enum CliInputFormat {
     Auto,
     Tap,
     Json,
+    Bun,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -168,6 +169,7 @@ impl From<CliInputFormat> for InputFormat {
             CliInputFormat::Auto => InputFormat::Auto,
             CliInputFormat::Tap => InputFormat::Tap,
             CliInputFormat::Json => InputFormat::Json,
+            CliInputFormat::Bun => InputFormat::Bun,
         }
     }
 }
@@ -254,6 +256,7 @@ mod tests {
         assert!(matches!(InputFormat::from(CliInputFormat::Auto), InputFormat::Auto));
         assert!(matches!(InputFormat::from(CliInputFormat::Tap), InputFormat::Tap));
         assert!(matches!(InputFormat::from(CliInputFormat::Json), InputFormat::Json));
+        assert!(matches!(InputFormat::from(CliInputFormat::Bun), InputFormat::Bun));
 
         assert!(matches!(SummaryFormat::from(CliSummaryFormat::None), SummaryFormat::None));
         assert!(matches!(SummaryFormat::from(CliSummaryFormat::Text), SummaryFormat::Text));

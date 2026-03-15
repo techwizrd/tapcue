@@ -19,6 +19,7 @@ Common runner inputs include:
 - `cargo nextest --message-format libtest-json-plus`
 - `jest --json`
 - `vitest --reporter=json`
+- `bun test`
 
 ## Runner examples
 
@@ -28,6 +29,7 @@ These commands are local/dev-style runs that trigger desktop notifications:
 go test ./... -json | tapcue
 env NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --message-format libtest-json-plus | tapcue
 npm test --silent | tapcue
+bun test | tapcue
 jest --json --outputFile /dev/stdout | tapcue
 vitest run --reporter=json | tapcue
 pytest --tap-stream | tapcue
@@ -62,7 +64,7 @@ cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue --f
 - `--no-notify`: disable desktop notifications (useful in CI/tests)
 - `--notify`: force desktop notifications on
 - `--desktop <auto|force-on|force-off>`: override desktop notification detection
-- `--format <auto|tap|json>`: input parsing format (default: `auto`)
+- `--format <auto|tap|json|bun>`: input parsing format (default: `auto`)
 - `--summary-format <none|text|json>`: emit run summary for automation
 - `--summary-file <path|->`: write summary output to a file or stdout (`-`)
 - `--dedup-failures` / `--no-dedup-failures`: control repeated failure notifications
@@ -93,7 +95,7 @@ Supported environment variables:
 - `TAPCUE_NO_NOTIFY` (`true/false`)
 - `TAPCUE_NOTIFICATIONS_ENABLED` (`true/false`)
 - `TAPCUE_DESKTOP` (`auto`, `force-on`, `force-off`)
-- `TAPCUE_FORMAT` (`auto`, `tap`, `json`)
+- `TAPCUE_FORMAT` (`auto`, `tap`, `json`, `bun`)
 - `TAPCUE_SUMMARY_FORMAT` (`none`, `text`, `json`)
 - `TAPCUE_SUMMARY_FILE` (path)
 - `TAPCUE_DEDUP_FAILURES` (`true/false`)
@@ -221,7 +223,7 @@ prek run --all-files
 prek run --hook-stage manual --all-files
 ```
 
-Cross-runner integration verification (Rust nextest, Go, npm TAP, Jest JSON, Vitest JSON, pytest TAP, unittest TAP):
+Cross-runner integration verification (Rust nextest, Go, npm TAP, Bun default output, Jest JSON, Vitest JSON, pytest TAP, unittest TAP):
 
 ```bash
 ./scripts/verify-runner-integrations.sh
@@ -233,6 +235,7 @@ Individual integration checks:
 ./scripts/verify-nextest-integration.sh
 ./scripts/verify-go-integration.sh
 ./scripts/verify-npm-tap-integration.sh
+./scripts/verify-bun-integration.sh
 ./scripts/verify-jest-integration.sh
 ./scripts/verify-vitest-integration.sh
 ./scripts/verify-pytest-integration.sh

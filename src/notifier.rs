@@ -13,6 +13,7 @@ pub enum FailureSource {
     Nextest,
     Jest,
     Vitest,
+    Bun,
 }
 
 impl FailureSource {
@@ -23,6 +24,7 @@ impl FailureSource {
             Self::Nextest => "nextest",
             Self::Jest => "jest",
             Self::Vitest => "vitest",
+            Self::Bun => "bun",
         }
     }
 }

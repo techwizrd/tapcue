@@ -14,6 +14,8 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 - `tapcue doctor` diagnostics command for desktop notification readiness, config source resolution, and disabled-notification explanations.
 - `tapcue init` command to generate `./.tapcue.toml` from defaults or current effective config.
 - Property-based parser tests for TAP/JSON stream robustness.
+- Bun test output support (including default Bun text and dot-style progress lines) with auto-detection and `--format bun`.
+- Native Bun runner integration check (`scripts/verify-bun-integration.sh`) and CI job coverage.
 
 ### Changed
 - Line-buffer hot path to indexed extraction/compaction for improved tiny-chunk stream performance.

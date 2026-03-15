@@ -34,7 +34,7 @@ Force desktop notifications on.
 .BI --desktop " auto|force-on|force-off"
 Desktop notification mode override.
 .TP
-.BI --format " auto|tap|json"
+.BI --format " auto|tap|json|bun"
 Input parsing format (default: auto).
 .TP
 .BI --summary-format " none|text|json"
@@ -99,7 +99,7 @@ Enable or disable notifications (true/false).
 Desktop mode override: auto, force-on, force-off.
 .TP
 .B TAPCUE_FORMAT
-Input format override: auto, tap, json.
+Input format override: auto, tap, json, bun.
 .TP
 .B TAPCUE_SUMMARY_FORMAT
 Summary format: none, text, json.
@@ -126,6 +126,9 @@ User-level configuration.
 Precedence order:
 CLI flags > environment variables > local config > user config > defaults.
 .SH EXAMPLES
+.TP
+Default Bun test output:
+.B bun test | tapcue
 .TP
 Go JSON stream:
 .B go test ./... -json | tapcue

@@ -7,6 +7,10 @@
 
 `npm test --silent | tapcue`
 
+- Process default Bun test output:
+
+`bun test | tapcue`
+
 - Process `go test` JSON output:
 
 `go test ./... -json | tapcue`

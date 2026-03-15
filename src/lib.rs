@@ -5,6 +5,7 @@
 //! precedence order:
 //! CLI flags > environment variables > local config > user config > defaults.
 
+pub mod bun_stream;
 pub mod cli;
 pub mod config;
 pub mod json_stream;
@@ -17,6 +18,7 @@ use std::io::{BufRead, BufReader};
 
 use anyhow::Result;
 
+use crate::bun_stream::BunStreamProcessor;
 use crate::config::InputFormat;
 use crate::json_stream::JsonStreamProcessor;
 use crate::notifier::Notifier;
@@ -35,6 +37,7 @@ pub struct AppConfig {
 enum StreamProcessor {
     Tap(TapStreamProcessor),
     Json(JsonStreamProcessor),
+    Bun(BunStreamProcessor),
 }
 
 pub fn process_stream<R: Read>(
@@ -115,6 +118,7 @@ fn make_processor(format: InputFormat, config: AppConfig) -> StreamProcessor {
         InputFormat::Json => {
             StreamProcessor::Json(JsonStreamProcessor::new(config.quiet_parse_errors))
         }
+        InputFormat::Bun => StreamProcessor::Bun(BunStreamProcessor::new()),
         InputFormat::Auto => unreachable!(),
     }
 }
@@ -135,6 +139,7 @@ fn ingest_with_processor(
     match processor {
         StreamProcessor::Tap(inner) => inner.ingest(input, notifier),
         StreamProcessor::Json(inner) => inner.ingest(input, notifier),
+        StreamProcessor::Bun(inner) => inner.ingest(input, notifier),
     }
 }
 
@@ -145,6 +150,10 @@ fn finish_with_processor(processor: StreamProcessor, notifier: &mut dyn Notifier
             inner.into_state()
         }
         StreamProcessor::Json(mut inner) => {
+            inner.finish(notifier);
+            inner.into_state()
+        }
+        StreamProcessor::Bun(mut inner) => {
             inner.finish(notifier);
             inner.into_state()
         }
@@ -170,9 +179,43 @@ fn detect_auto_format(buffer: &str) -> Option<InputFormat> {
         {
             return Some(InputFormat::Tap);
         }
+
+        if looks_like_bun_output(trimmed) {
+            return Some(InputFormat::Bun);
+        }
     }
 
     None
+}
+
+fn looks_like_bun_output(line: &str) -> bool {
+    line.starts_with("bun test ")
+        || line.starts_with("(pass)")
+        || line.starts_with("(fail)")
+        || line.eq_ignore_ascii_case("failures:")
+        || line.starts_with("Ran ")
+        || is_dot_progress_line(line)
+}
+
+fn is_dot_progress_line(line: &str) -> bool {
+    let mut saw_progress = false;
+    let mut saw_strong_signal = false;
+    for ch in line.chars() {
+        match ch {
+            '.' => {
+                saw_progress = true;
+                saw_strong_signal = true;
+            }
+            'F' | 'f' | 'S' | 's' => {
+                saw_progress = true;
+                saw_strong_signal = true;
+            }
+            ch if ch.is_whitespace() => {}
+            _ => return false,
+        }
+    }
+
+    saw_progress && saw_strong_signal
 }
 
 fn is_tap_plan_line(line: &str) -> bool {
@@ -388,6 +431,14 @@ mod tests {
         assert!(matches!(
             detect_auto_format("1..3 # plan comment\n"),
             Some(crate::config::InputFormat::Tap)
+        ));
+        assert!(matches!(
+            detect_auto_format("bun test v1.2.0\n"),
+            Some(crate::config::InputFormat::Bun)
+        ));
+        assert!(matches!(
+            detect_auto_format("(fail) adds numbers\n"),
+            Some(crate::config::InputFormat::Bun)
         ));
         assert!(detect_auto_format("hello world\n").is_none());
         assert!(detect_auto_format("\n\n").is_none());

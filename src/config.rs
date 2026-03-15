@@ -86,6 +86,7 @@ pub enum InputFormat {
     Auto,
     Tap,
     Json,
+    Bun,
 }
 
 impl InputFormat {
@@ -94,6 +95,7 @@ impl InputFormat {
             Self::Auto => "auto",
             Self::Tap => "tap",
             Self::Json => "json",
+            Self::Bun => "bun",
         }
     }
 }
@@ -512,6 +514,7 @@ fn read_env_input_format(key: &str) -> Option<InputFormat> {
         "auto" => Some(InputFormat::Auto),
         "tap" => Some(InputFormat::Tap),
         "json" => Some(InputFormat::Json),
+        "bun" => Some(InputFormat::Bun),
         _ => {
             eprintln!("tapcue: invalid format in {key}: {value}");
             None

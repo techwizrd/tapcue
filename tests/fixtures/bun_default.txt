@@ -1,0 +1,10 @@
+bun test v1.2.3
+
+src/math.test.ts:
+(pass) adds numbers [0.22ms]
+(fail) divides by zero [0.31ms]
+
+ 1 pass
+ 1 fail
+ 2 expect() calls
+Ran 2 tests across 1 file. [15.00ms]

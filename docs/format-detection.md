@@ -5,6 +5,7 @@
 - `auto` (default)
 - `tap`
 - `json`
+- `bun`
 
 ## How `auto` works
 
@@ -21,6 +22,13 @@ TAP signals:
 - `not ok ...`
 - `Bail out! ...`
 - plan line such as `1..42`
+
+Bun signals:
+
+- `bun test ...`
+- `(pass) ...` / `(fail) ...`
+- dot-progress lines such as `..F.S`
+- `failures:` section header
 
 If no explicit signal appears before EOF, `tapcue` falls back to:
 
@@ -44,12 +52,13 @@ You can force parser selection:
 ```bash
 tapcue --format tap
 tapcue --format json
+tapcue --format bun
 ```
 
 Or via config/environment:
 
-- config: `[input] format = "auto|tap|json"`
-- env: `TAPCUE_FORMAT=auto|tap|json`
+- config: `[input] format = "auto|tap|json|bun"`
+- env: `TAPCUE_FORMAT=auto|tap|json|bun`
 
 To inspect detection decisions during runtime:
 

@@ -24,6 +24,7 @@ jobs:
       integration_rust_nextest: ${{ steps.filter.outputs.integration_rust_nextest }}
       integration_go: ${{ steps.filter.outputs.integration_go }}
       integration_npm_tap: ${{ steps.filter.outputs.integration_npm_tap }}
+      integration_bun: ${{ steps.filter.outputs.integration_bun }}
       integration_jest_json: ${{ steps.filter.outputs.integration_jest_json }}
       integration_vitest_json: ${{ steps.filter.outputs.integration_vitest_json }}
       integration_python_pytest: ${{ steps.filter.outputs.integration_python_pytest }}
@@ -62,6 +63,11 @@ jobs:
               - 'scripts/verify-npm-tap-integration.sh'
               - 'tests/runner-fixtures/npm-tap/**'
               - '.github/workflows/**'
+            integration_bun:
+              - 'src/**'
+              - 'scripts/verify-bun-integration.sh'
+              - 'tests/runner-fixtures/bun-default/**'
+              - '.github/workflows/**'
             integration_jest_json:
               - 'src/**'
               - 'scripts/verify-jest-integration.sh'
@@ -85,7 +91,7 @@ jobs:
 
   build-tapcue-debug:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.integration_rust_nextest == 'true' || needs.changes.outputs.integration_go == 'true' || needs.changes.outputs.integration_npm_tap == 'true' || needs.changes.outputs.integration_jest_json == 'true' || needs.changes.outputs.integration_vitest_json == 'true' || needs.changes.outputs.integration_python_pytest == 'true' || needs.changes.outputs.integration_python_unittest == 'true'
+    if: github.event_name != 'pull_request' || needs.changes.outputs.integration_rust_nextest == 'true' || needs.changes.outputs.integration_go == 'true' || needs.changes.outputs.integration_npm_tap == 'true' || needs.changes.outputs.integration_bun == 'true' || needs.changes.outputs.integration_jest_json == 'true' || needs.changes.outputs.integration_vitest_json == 'true' || needs.changes.outputs.integration_python_pytest == 'true' || needs.changes.outputs.integration_python_unittest == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -316,6 +322,32 @@ jobs:
           TAPCUE_BIN: ${{ github.workspace }}/bin/tapcue
         run: ./scripts/verify-npm-tap-integration.sh
 
+  integration-bun:
+    needs: [changes, build-tapcue-debug]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.integration_bun == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Download tapcue debug binary
+        uses: actions/download-artifact@v8
+        with:
+          name: tapcue-debug-bin
+          path: bin
+
+      - name: Ensure tapcue binary is executable
+        run: chmod +x bin/tapcue
+
+      - name: Verify Bun integration
+        env:
+          TAPCUE_BIN: ${{ github.workspace }}/bin/tapcue
+        run: ./scripts/verify-bun-integration.sh
+
   integration-jest-json:
     needs: [changes, build-tapcue-debug]
     if: github.event_name != 'pull_request' || needs.changes.outputs.integration_jest_json == 'true'
@@ -453,6 +485,7 @@ jobs:
       - integration-rust-nextest
       - integration-go
       - integration-npm-tap
+      - integration-bun
       - integration-jest-json
       - integration-vitest-json
       - integration-python-pytest

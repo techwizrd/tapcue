@@ -129,7 +129,7 @@ fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
         "notifications.desktop",
         &format!("{} (source: {})", report.desktop_mode.as_str(), sources.desktop.as_str()),
     );
-    print_neutral_row(&color, "platform", report.platform);
+    print_neutral_row("platform", report.platform);
 
     print_section("checks");
     let check_notifications_enabled = report.notifications_enabled;
@@ -182,23 +182,21 @@ fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
         } else {
             print_warn_row(&color, "auto.environment_ready", "false");
         }
-        print_neutral_row(&color, "env.DISPLAY", if linux_env.display { "set" } else { "unset" });
+        print_neutral_row("env.DISPLAY", if linux_env.display { "set" } else { "unset" });
         print_neutral_row(
-            &color,
             "env.WAYLAND_DISPLAY",
             if linux_env.wayland_display { "set" } else { "unset" },
         );
         print_neutral_row(
-            &color,
             "env.DBUS_SESSION_BUS_ADDRESS",
             if linux_env.dbus_session_bus_address { "set" } else { "unset" },
         );
     }
     print_section("backend");
     if let Some(command) = report.backend_command {
-        print_neutral_row(&color, "backend.command", command);
+        print_neutral_row("backend.command", command);
     } else {
-        print_neutral_row(&color, "backend.command", "none");
+        print_neutral_row("backend.command", "none");
     }
     if report.backend_found {
         print_ok_row(&color, "backend.found", "true");
@@ -209,7 +207,6 @@ fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
 
     if let Some(path) = paths.user_config_path {
         print_neutral_row(
-            &color,
             "config.user",
             &format!(
                 "{} ({})",
@@ -218,10 +215,9 @@ fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
             ),
         );
     } else {
-        print_neutral_row(&color, "config.user", "unavailable");
+        print_neutral_row("config.user", "unavailable");
     }
     print_neutral_row(
-        &color,
         "config.local",
         &format!(
             "{} ({})",
@@ -233,7 +229,7 @@ fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
     if !fixes.is_empty() {
         print_section("fixes");
         for (index, fix) in fixes.drain(..).enumerate() {
-            print_neutral_row(&color, &format!("fix.{}", index + 1), &fix);
+            print_neutral_row(&format!("fix.{}", index + 1), &fix);
         }
     }
 
@@ -266,22 +262,22 @@ fn print_state_row(color: &DoctorColor, good: bool, key: &str, value: &str) {
 }
 
 fn print_ok_row(color: &DoctorColor, key: &str, value: &str) {
-    print_row(color.green("✓"), key, value);
+    print_row(&color.green("✓"), key, value);
 }
 
 fn print_warn_row(color: &DoctorColor, key: &str, value: &str) {
-    print_row(color.yellow("!"), key, value);
+    print_row(&color.yellow("!"), key, value);
 }
 
 fn print_fail_row(color: &DoctorColor, key: &str, value: &str) {
-    print_row(color.red("✗"), key, value);
+    print_row(&color.red("✗"), key, value);
 }
 
-fn print_neutral_row(_color: &DoctorColor, key: &str, value: &str) {
-    print_row("-".to_owned(), key, value);
+fn print_neutral_row(key: &str, value: &str) {
+    print_row("-", key, value);
 }
 
-fn print_row(icon: String, key: &str, value: &str) {
+fn print_row(icon: &str, key: &str, value: &str) {
     const KEY_WIDTH: usize = 33;
     let dotted_key = format!("{key:.<KEY_WIDTH$}");
     println!("  {icon} {dotted_key} {value}");

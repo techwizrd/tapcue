@@ -107,9 +107,9 @@ impl<'a> PolicyNotifier<'a> {
 
     fn can_emit_failure(&mut self, failure: &FailureNotification) -> bool {
         const MAX_TRACKED_FAILURE_LABELS: usize = 4096;
-        let dedup_key = failure.dedup_key();
 
         if self.policy.dedup_failures {
+            let dedup_key = failure.dedup_key();
             if self.seen_failures.contains(&dedup_key) {
                 return false;
             }
@@ -212,11 +212,11 @@ impl Environment for ProcessEnvironment {
 fn desktop_notifications_available(platform: Platform, env: &dyn Environment) -> bool {
     match platform {
         #[cfg(any(target_os = "linux", test))]
-        Platform::Linux => {
-            env.var_os("DISPLAY").is_some()
-                || env.var_os("WAYLAND_DISPLAY").is_some()
-                || env.var_os("DBUS_SESSION_BUS_ADDRESS").is_some()
-        }
+        Platform::Linux => linux_environment_ready(LinuxEnvironmentStatus {
+            display: env.var_os("DISPLAY").is_some(),
+            wayland_display: env.var_os("WAYLAND_DISPLAY").is_some(),
+            dbus_session_bus_address: env.var_os("DBUS_SESSION_BUS_ADDRESS").is_some(),
+        }),
         #[cfg(any(target_os = "macos", test))]
         Platform::MacOs => true,
         #[cfg(any(target_os = "windows", test))]
@@ -275,11 +275,7 @@ fn build_doctor_report(
     let notifications_enabled = !no_notify;
     let auto_environment_ready = match signals.platform {
         #[cfg(any(target_os = "linux", test))]
-        Platform::Linux => {
-            signals.linux_environment.display
-                || signals.linux_environment.wayland_display
-                || signals.linux_environment.dbus_session_bus_address
-        }
+        Platform::Linux => linux_environment_ready(signals.linux_environment),
         #[cfg(any(target_os = "macos", test))]
         Platform::MacOs => true,
         #[cfg(any(target_os = "windows", test))]
@@ -351,6 +347,11 @@ fn backend_available_for_platform(platform: Platform) -> bool {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn linux_environment_ready(status: LinuxEnvironmentStatus) -> bool {
+    status.display || status.wayland_display || status.dbus_session_bus_address
+}
+
 fn platform_name(platform: Platform) -> &'static str {
     match platform {
         #[cfg(any(target_os = "linux", test))]
@@ -403,11 +404,24 @@ trait NotificationSender {
 #[derive(Debug)]
 struct ShellNotificationSender {
     platform: Platform,
+    #[cfg(any(target_os = "macos", test))]
+    macos_backend: Option<MacOsBackend>,
+}
+
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MacOsBackend {
+    TerminalNotifier,
+    OsaScript,
 }
 
 impl ShellNotificationSender {
     fn new(platform: Platform) -> Self {
-        Self { platform }
+        Self {
+            platform,
+            #[cfg(any(target_os = "macos", test))]
+            macos_backend: detect_macos_backend(platform),
+        }
     }
 
     fn send_linux(&self, kind: NotificationKind, title: &str, body: &str) -> Result<(), String> {
@@ -462,11 +476,13 @@ impl ShellNotificationSender {
 
     #[cfg(any(target_os = "macos", test))]
     fn send_macos(&self, kind: NotificationKind, title: &str, body: &str) -> Result<(), String> {
-        if command_in_path("terminal-notifier") {
-            return self.send_macos_terminal_notifier(kind, title, body);
+        match self.macos_backend {
+            Some(MacOsBackend::TerminalNotifier) => {
+                self.send_macos_terminal_notifier(kind, title, body)
+            }
+            Some(MacOsBackend::OsaScript) => self.send_macos_osascript(kind, title, body),
+            None => Err("no macOS notification backend available".to_owned()),
         }
-
-        self.send_macos_osascript(kind, title, body)
     }
 
     #[cfg(any(target_os = "macos", test))]
@@ -559,6 +575,23 @@ impl ShellNotificationSender {
                 }
             })
     }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn detect_macos_backend(platform: Platform) -> Option<MacOsBackend> {
+    if platform != Platform::MacOs {
+        return None;
+    }
+
+    if command_in_path("terminal-notifier") {
+        return Some(MacOsBackend::TerminalNotifier);
+    }
+
+    if command_in_path("osascript") {
+        return Some(MacOsBackend::OsaScript);
+    }
+
+    None
 }
 
 impl NotificationSender for ShellNotificationSender {

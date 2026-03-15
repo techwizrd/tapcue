@@ -45,14 +45,8 @@ pub fn process_stream<R: Read>(
     let mut buffered_reader = BufReader::with_capacity(16 * 1024, reader);
     let mut line_buf = Vec::with_capacity(256);
     let mut selected = match config.input_format {
-        InputFormat::Tap => Some(StreamProcessor::Tap(TapStreamProcessor::new(
-            config.quiet_parse_errors,
-            config.strict,
-        ))),
-        InputFormat::Json => {
-            Some(StreamProcessor::Json(JsonStreamProcessor::new(config.quiet_parse_errors)))
-        }
         InputFormat::Auto => None,
+        format => Some(make_processor(format, config)),
     };
     let mut undecided_buffer = String::new();
 
@@ -75,16 +69,7 @@ pub fn process_stream<R: Read>(
             if config.trace_detection {
                 eprintln!("tapcue: auto-detected input format: {}", format.as_str());
             }
-            let mut processor = match format {
-                InputFormat::Tap => StreamProcessor::Tap(TapStreamProcessor::new(
-                    config.quiet_parse_errors,
-                    config.strict,
-                )),
-                InputFormat::Json => {
-                    StreamProcessor::Json(JsonStreamProcessor::new(config.quiet_parse_errors))
-                }
-                InputFormat::Auto => unreachable!(),
-            };
+            let mut processor = make_processor(format, config);
 
             ingest_with_processor(&mut processor, &undecided_buffer, notifier);
             undecided_buffer.clear();
@@ -98,16 +83,7 @@ pub fn process_stream<R: Read>(
                 );
             }
 
-            let mut processor = match fallback {
-                InputFormat::Tap => StreamProcessor::Tap(TapStreamProcessor::new(
-                    config.quiet_parse_errors,
-                    config.strict,
-                )),
-                InputFormat::Json => {
-                    StreamProcessor::Json(JsonStreamProcessor::new(config.quiet_parse_errors))
-                }
-                InputFormat::Auto => unreachable!(),
-            };
+            let mut processor = make_processor(fallback, config);
             ingest_with_processor(&mut processor, &undecided_buffer, notifier);
             undecided_buffer.clear();
             selected = Some(processor);
@@ -121,16 +97,7 @@ pub fn process_stream<R: Read>(
             eprintln!("tapcue: auto-selected fallback input format: {}", default_format.as_str());
         }
 
-        match default_format {
-            InputFormat::Tap => StreamProcessor::Tap(TapStreamProcessor::new(
-                config.quiet_parse_errors,
-                config.strict,
-            )),
-            InputFormat::Json => {
-                StreamProcessor::Json(JsonStreamProcessor::new(config.quiet_parse_errors))
-            }
-            InputFormat::Auto => unreachable!(),
-        }
+        make_processor(default_format, config)
     });
 
     if !undecided_buffer.is_empty() {
@@ -138,6 +105,18 @@ pub fn process_stream<R: Read>(
     }
 
     Ok(finish_with_processor(processor, notifier))
+}
+
+fn make_processor(format: InputFormat, config: AppConfig) -> StreamProcessor {
+    match format {
+        InputFormat::Tap => {
+            StreamProcessor::Tap(TapStreamProcessor::new(config.quiet_parse_errors, config.strict))
+        }
+        InputFormat::Json => {
+            StreamProcessor::Json(JsonStreamProcessor::new(config.quiet_parse_errors))
+        }
+        InputFormat::Auto => unreachable!(),
+    }
 }
 
 fn fallback_format(buffer: &str) -> InputFormat {
@@ -197,10 +176,21 @@ fn detect_auto_format(buffer: &str) -> Option<InputFormat> {
 }
 
 fn is_tap_plan_line(line: &str) -> bool {
-    if let Some((left, right)) = line.split_once("..") {
-        return left.parse::<usize>().is_ok() && right.parse::<usize>().is_ok();
+    let Some((left, right)) = line.split_once("..") else {
+        return false;
+    };
+
+    if left.trim().parse::<usize>().is_err() {
+        return false;
     }
-    false
+
+    let right_trimmed = right.trim_start();
+    let digits_end = right_trimmed.chars().take_while(|ch| ch.is_ascii_digit()).count();
+    if digits_end == 0 {
+        return false;
+    }
+
+    right_trimmed[..digits_end].parse::<usize>().is_ok()
 }
 
 #[cfg(test)]
@@ -391,6 +381,14 @@ mod tests {
             Some(crate::config::InputFormat::Tap)
         ));
         assert!(matches!(detect_auto_format("1..5\n"), Some(crate::config::InputFormat::Tap)));
+        assert!(matches!(
+            detect_auto_format("1..0 # skip all\n"),
+            Some(crate::config::InputFormat::Tap)
+        ));
+        assert!(matches!(
+            detect_auto_format("1..3 # plan comment\n"),
+            Some(crate::config::InputFormat::Tap)
+        ));
         assert!(detect_auto_format("hello world\n").is_none());
         assert!(detect_auto_format("\n\n").is_none());
 

@@ -535,10 +535,10 @@ fn split_directive(body: &str) -> (&str, Option<&str>) {
 }
 
 fn parse_directive(raw: &str) -> Option<ParsedDirective> {
-    let token = raw.split_whitespace().next()?.to_ascii_uppercase();
-    if token == "TODO" {
+    let token = raw.split_whitespace().next()?;
+    if token.eq_ignore_ascii_case("TODO") {
         Some(ParsedDirective::Todo)
-    } else if token == "SKIP" {
+    } else if token.eq_ignore_ascii_case("SKIP") {
         Some(ParsedDirective::Skip)
     } else {
         None

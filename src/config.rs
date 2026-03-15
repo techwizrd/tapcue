@@ -238,14 +238,14 @@ impl EffectiveConfig {
 
         if let Some(value) = file_config.notifications.enabled {
             self.no_notify = !value;
-            if let (Some(source), Some(sources)) = (source, notification_sources.as_deref_mut()) {
+            if let (Some(source), Some(sources)) = (source, notification_sources.as_mut()) {
                 sources.enabled = source;
             }
         }
 
         if let Some(value) = file_config.notifications.desktop {
             self.desktop_mode = value;
-            if let (Some(source), Some(sources)) = (source, notification_sources.as_deref_mut()) {
+            if let (Some(source), Some(sources)) = (source, notification_sources.as_mut()) {
                 sources.desktop = source;
             }
         }
@@ -287,21 +287,21 @@ impl EffectiveConfig {
 
         if let Some(value) = read_env_bool("TAPCUE_NO_NOTIFY") {
             self.no_notify = value;
-            if let Some(sources) = notification_sources.as_deref_mut() {
+            if let Some(sources) = notification_sources.as_mut() {
                 sources.enabled = ConfigSource::Environment;
             }
         }
 
         if let Some(value) = read_env_bool("TAPCUE_NOTIFICATIONS_ENABLED") {
             self.no_notify = !value;
-            if let Some(sources) = notification_sources.as_deref_mut() {
+            if let Some(sources) = notification_sources.as_mut() {
                 sources.enabled = ConfigSource::Environment;
             }
         }
 
         if let Some(value) = read_env_desktop_mode("TAPCUE_DESKTOP") {
             self.desktop_mode = value;
-            if let Some(sources) = notification_sources.as_deref_mut() {
+            if let Some(sources) = notification_sources.as_mut() {
                 sources.desktop = ConfigSource::Environment;
             }
         }
@@ -360,21 +360,21 @@ impl EffectiveConfig {
 
         if cli.no_notify {
             self.no_notify = true;
-            if let Some(sources) = notification_sources.as_deref_mut() {
+            if let Some(sources) = notification_sources.as_mut() {
                 sources.enabled = ConfigSource::Cli;
             }
         }
 
         if cli.notify {
             self.no_notify = false;
-            if let Some(sources) = notification_sources.as_deref_mut() {
+            if let Some(sources) = notification_sources.as_mut() {
                 sources.enabled = ConfigSource::Cli;
             }
         }
 
         if let Some(value) = cli.desktop {
             self.desktop_mode = value.into();
-            if let Some(sources) = notification_sources.as_deref_mut() {
+            if let Some(sources) = notification_sources.as_mut() {
                 sources.desktop = ConfigSource::Cli;
             }
         }

@@ -1,13 +1,17 @@
 use std::fs;
 use std::io;
 use std::io::IsTerminal;
+use std::io::Read;
 use std::io::Write;
 use std::path::Path;
+use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
 
 use anyhow::{bail, Result};
 use clap::Parser;
 
-use tapcue::cli::{Cli, CliCommand, InitCli};
+use tapcue::cli::{Cli, CliCommand, InitCli, RunCli};
 use tapcue::config::{
     resolved_config_paths, EffectiveConfig, NotificationConfigSources, SummaryFormat,
 };
@@ -29,8 +33,11 @@ fn main() -> Result<()> {
                     EffectiveConfig::load_with_sources(&Cli::without_overrides())?;
                 emit_doctor(&effective_config, &notification_sources);
             }
+            CliCommand::Run(_) => {}
         }
-        return Ok(());
+        if !matches!(command, CliCommand::Run(_)) {
+            return Ok(());
+        }
     }
 
     let effective_config = EffectiveConfig::load(&cli)?;
@@ -59,23 +66,130 @@ fn main() -> Result<()> {
         },
     );
 
-    let state = process_stream(
-        io::stdin().lock(),
-        &mut notifier,
-        AppConfig {
-            quiet_parse_errors: effective_config.quiet_parse_errors,
-            strict: effective_config.strict,
-            input_format: effective_config.input_format,
-            trace_detection: effective_config.trace_detection,
-        },
-    )?;
+    let app_config = AppConfig {
+        quiet_parse_errors: effective_config.quiet_parse_errors,
+        strict: effective_config.strict,
+        input_format: effective_config.input_format,
+        trace_detection: effective_config.trace_detection,
+    };
+
+    let (state, child_status) = match &cli.command {
+        Some(CliCommand::Run(run_cli)) => {
+            let (state, status) = run_and_process(run_cli, &mut notifier, app_config)?;
+            (state, Some(status))
+        }
+        _ => {
+            let state = process_stream(io::stdin().lock(), &mut notifier, app_config)?;
+            (state, None)
+        }
+    };
 
     emit_summary(&effective_config, &state)?;
+
+    if let Some(status) = child_status {
+        if let Some(code) = status.code() {
+            if code != 0 {
+                std::process::exit(code);
+            }
+        } else {
+            std::process::exit(1);
+        }
+    }
 
     if state.is_success() {
         Ok(())
     } else {
         std::process::exit(1);
+    }
+}
+
+fn run_and_process(
+    run_cli: &RunCli,
+    notifier: &mut dyn Notifier,
+    app_config: AppConfig,
+) -> Result<(RunState, std::process::ExitStatus)> {
+    let program = run_cli
+        .command
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("tapcue: run command is required"))?;
+    let args = &run_cli.command[1..];
+
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("tapcue: failed to capture child stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("tapcue: failed to capture child stderr"))?;
+
+    let merged = MergedReader::new(stdout, stderr);
+    let state = process_stream(merged, notifier, app_config)?;
+    let status = child.wait()?;
+
+    Ok((state, status))
+}
+
+struct MergedReader {
+    rx: Receiver<Vec<u8>>,
+    current: std::io::Cursor<Vec<u8>>,
+}
+
+impl MergedReader {
+    fn new(stdout: std::process::ChildStdout, stderr: std::process::ChildStderr) -> Self {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+
+        let stdout_tx = tx.clone();
+        thread::spawn(move || pump_reader(stdout, stdout_tx));
+
+        let stderr_tx = tx.clone();
+        thread::spawn(move || pump_reader(stderr, stderr_tx));
+
+        drop(tx);
+
+        Self { rx, current: std::io::Cursor::new(Vec::new()) }
+    }
+}
+
+impl Read for MergedReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            let current = self.current.get_ref();
+            let position = self.current.position() as usize;
+            if position < current.len() {
+                return self.current.read(buf);
+            }
+
+            match self.rx.recv() {
+                Ok(chunk) => {
+                    self.current = std::io::Cursor::new(chunk);
+                }
+                Err(_) => return Ok(0),
+            }
+        }
+    }
+}
+
+fn pump_reader<R: Read + Send + 'static>(mut reader: R, tx: mpsc::Sender<Vec<u8>>) {
+    let mut buffer = [0_u8; 8192];
+
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                if tx.send(buffer[..read].to_vec()).is_err() {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
     }
 }
 

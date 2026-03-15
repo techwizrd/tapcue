@@ -3,12 +3,7 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use crate::config::{DesktopMode, InputFormat, SummaryFormat};
 
 #[derive(Debug, Parser)]
-#[command(
-    author,
-    version,
-    about = "Emit desktop notifications from TAP stream",
-    args_conflicts_with_subcommands = true
-)]
+#[command(author, version, about = "Emit desktop notifications from TAP stream")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<CliCommand>,
@@ -120,6 +115,7 @@ impl Cli {
 pub enum CliCommand {
     Init(InitCli),
     Doctor,
+    Run(RunCli),
 }
 
 #[derive(Debug, Args)]
@@ -129,6 +125,12 @@ pub struct InitCli {
 
     #[arg(long, default_value_t = false, help = "Overwrite existing .tapcue.toml")]
     pub force: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct RunCli {
+    #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
+    pub command: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -245,6 +247,17 @@ mod tests {
     fn parses_doctor_subcommand() {
         let cli = Cli::parse_from(["tapcue", "doctor"]);
         assert!(matches!(cli.command, Some(CliCommand::Doctor)));
+    }
+
+    #[test]
+    fn parses_run_subcommand_command_args() {
+        let cli = Cli::parse_from(["tapcue", "run", "--", "bun", "test", "--watch"]);
+        match cli.command {
+            Some(CliCommand::Run(run)) => {
+                assert_eq!(run.command, vec!["bun", "test", "--watch"]);
+            }
+            _ => panic!("expected run subcommand"),
+        }
     }
 
     #[test]

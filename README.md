@@ -29,10 +29,17 @@ These commands are local/dev-style runs that trigger desktop notifications:
 go test ./... -json | tapcue
 env NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --message-format libtest-json-plus | tapcue
 npm test --silent | tapcue
-bun test | tapcue
+bun test 2>&1 | tapcue
 jest --json --outputFile /dev/stdout | tapcue
 vitest run --reporter=json | tapcue
 pytest --tap-stream | tapcue
+```
+
+Or let `tapcue` run a command and capture both stdout+stderr itself:
+
+```bash
+tapcue run -- bun test
+tapcue run -- go test ./... -json
 ```
 
 ## Install / Build

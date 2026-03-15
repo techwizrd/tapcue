@@ -65,3 +65,18 @@ To inspect detection decisions during runtime:
 ```bash
 tapcue --trace-detection
 ```
+
+## Notes for Bun
+
+Some Bun versions/environments emit reporter lines on stderr. In plain pipe mode,
+merge stderr into stdout:
+
+```bash
+bun test 2>&1 | tapcue
+```
+
+Or use command mode:
+
+```bash
+tapcue run -- bun test
+```

@@ -151,6 +151,12 @@ impl BunStreamProcessor {
     }
 }
 
+impl Default for BunStreamProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Copy)]
 enum SummaryKind {
     Total,
@@ -212,9 +218,7 @@ fn parse_failure_section_label(line: &str) -> Option<String> {
 }
 
 fn parse_ran_total(line: &str) -> Option<usize> {
-    let Some(rest) = line.strip_prefix("Ran ") else {
-        return None;
-    };
+    let rest = line.strip_prefix("Ran ")?;
 
     let mut tokens = rest.split_whitespace();
     let total = tokens.next()?.parse::<usize>().ok()?;

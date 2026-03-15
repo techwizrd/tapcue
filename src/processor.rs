@@ -439,9 +439,7 @@ fn parse_version_line(line: &str) -> Option<bool> {
 
 fn parse_bailout(line: &str) -> Option<Cow<'_, str>> {
     let prefix = "Bail out!";
-    let Some(head) = line.get(..prefix.len()) else {
-        return None;
-    };
+    let head = line.get(..prefix.len())?;
 
     if !head.eq_ignore_ascii_case(prefix) {
         return None;

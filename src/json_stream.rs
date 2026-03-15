@@ -377,15 +377,7 @@ fn nextest_event_name(value: &Value) -> &str {
 }
 
 fn first_non_empty_string<'a>(candidates: &[Option<&'a str>]) -> Option<&'a str> {
-    for candidate in candidates {
-        if let Some(value) = candidate {
-            if !value.trim().is_empty() {
-                return Some(value);
-            }
-        }
-    }
-
-    None
+    candidates.iter().flatten().find(|value| !value.trim().is_empty()).copied()
 }
 
 fn short_reason(raw: &str) -> String {

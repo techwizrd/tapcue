@@ -5,7 +5,7 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.75-blue?logo=rust)](https://github.com/techwizrd/tapcue/blob/main/Cargo.toml)
 [![License](https://img.shields.io/github/license/techwizrd/tapcue)](LICENSE)
 
-`tapcue` reads TAP (Test Anything Protocol) output from `stdin` and sends desktop notifications for:
+`tapcue` reads TAP (Test Anything Protocol) and JSON test output from `stdin` and sends desktop notifications for:
 
 - failing tests
 - bailouts
@@ -13,7 +13,7 @@
 
 It is designed for streaming TAP input and incremental parsing. 🦀
 
-`tapcue` also supports streaming JSON test output from common tools:
+Common runner inputs include:
 
 - `go test -json`
 - `cargo nextest --message-format libtest-json-plus`
@@ -21,6 +21,8 @@ It is designed for streaming TAP input and incremental parsing. 🦀
 - `vitest --reporter=json`
 
 ## Runner examples
+
+These commands are local/dev-style runs that trigger desktop notifications:
 
 ```bash
 go test ./... -json | tapcue
@@ -52,7 +54,7 @@ cargo install --git https://github.com/techwizrd/tapcue --rev <commit-sha> tapcu
 cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue --force
 ```
 
-## CLI flags
+## CLI options and subcommands
 
 - `--quiet-parse-errors`: suppress parse warnings for malformed TAP
 - `--no-quiet-parse-errors`: force parse warnings on
@@ -103,6 +105,12 @@ macOS notification backend notes:
 - `tapcue` uses `terminal-notifier` automatically when it is installed and available in `PATH`.
 - Otherwise it falls back to `osascript` (available on standard macOS installs).
 
+Notification backend requirements by platform:
+
+- Linux: `notify-send` available in `PATH` (usually from `libnotify-bin`).
+- macOS: `terminal-notifier` in `PATH`, or built-in `osascript`.
+- Windows: `powershell` in `PATH`.
+
 Example `.tapcue.toml`:
 
 ```toml
@@ -146,6 +154,12 @@ Automation-friendly summary example:
 
 ```bash
 go test ./... -json | tapcue --summary-format json --summary-file run-summary.json
+```
+
+CI-oriented mode (no desktop notifications, emit machine-readable summary):
+
+```bash
+go test ./... -json | tapcue --no-notify --summary-format json --summary-file run-summary.json
 ```
 
 Emit summary JSON to stdout explicitly:

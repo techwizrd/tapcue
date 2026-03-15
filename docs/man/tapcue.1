@@ -127,20 +127,23 @@ Precedence order:
 CLI flags > environment variables > local config > user config > defaults.
 .SH EXAMPLES
 .TP
-Basic TAP usage:
-.B prove -v t/*.t | tapcue
-.TP
 Go JSON stream:
 .B go test ./... -json | tapcue
 .TP
 Nextest JSON stream:
 .B env NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --message-format libtest-json-plus | tapcue
 .TP
-Disable notifications:
-.B cat results.tap | tapcue --no-notify
+Jest JSON stream:
+.B jest --json --outputFile /dev/stdout | tapcue
+.TP
+pytest TAP stream:
+.B pytest --tap-stream | tapcue
 .TP
 Emit JSON summary to a file:
 .B go test ./... -json | tapcue --summary-format json --summary-file run-summary.json
+.TP
+CI mode (no desktop notifications + summary file):
+.B go test ./... -json | tapcue --no-notify --summary-format json --summary-file run-summary.json
 .TP
 Validate merged config:
 .B tapcue --validate-config

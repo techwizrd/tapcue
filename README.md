@@ -99,6 +99,11 @@ Supported environment variables:
 - `TAPCUE_MAX_FAILURE_NOTIFICATIONS` (integer)
 - `TAPCUE_TRACE_DETECTION` (`true/false`)
 
+macOS notification backend notes:
+
+- `tapcue` uses `terminal-notifier` automatically when it is installed and available in `PATH`.
+- Otherwise it falls back to `osascript` (available on standard macOS installs).
+
 Example `.tapcue.toml`:
 
 ```toml

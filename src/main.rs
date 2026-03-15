@@ -321,7 +321,7 @@ fn suggested_fixes(
                     .to_owned(),
             ),
             Some("osascript") => fixes.push(
-                "Ensure osascript is available (standard macOS install) and present in PATH"
+                "Ensure osascript is available (standard macOS install) or install terminal-notifier, and keep the chosen backend in PATH"
                     .to_owned(),
             ),
             Some("powershell") => fixes.push(

@@ -261,7 +261,7 @@ pub fn doctor_notifications(no_notify: bool, mode: DesktopMode) -> NotificationD
             wayland_display: std::env::var_os("WAYLAND_DISPLAY").is_some(),
             dbus_session_bus_address: std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some(),
         },
-        backend_found: backend_command_for_platform(platform).is_some_and(command_in_path),
+        backend_found: backend_available_for_platform(platform),
     };
 
     build_doctor_report(no_notify, mode, signals)
@@ -336,6 +336,18 @@ fn backend_command_for_platform(platform: Platform) -> Option<&'static str> {
         #[cfg(any(target_os = "windows", test))]
         Platform::Windows => Some("powershell"),
         Platform::Other => None,
+    }
+}
+
+fn backend_available_for_platform(platform: Platform) -> bool {
+    match platform {
+        #[cfg(any(target_os = "linux", test))]
+        Platform::Linux => command_in_path("notify-send"),
+        #[cfg(any(target_os = "macos", test))]
+        Platform::MacOs => command_in_path("terminal-notifier") || command_in_path("osascript"),
+        #[cfg(any(target_os = "windows", test))]
+        Platform::Windows => command_in_path("powershell"),
+        Platform::Other => false,
     }
 }
 
@@ -449,11 +461,62 @@ impl ShellNotificationSender {
     }
 
     #[cfg(any(target_os = "macos", test))]
-    fn send_macos(&self, title: &str, body: &str) -> Result<(), String> {
-        let escaped_title = title.replace('"', "\\\"");
-        let escaped_body = body.replace('"', "\\\"");
-        let script =
-            format!("display notification \"{escaped_body}\" with title \"{escaped_title}\"");
+    fn send_macos(&self, kind: NotificationKind, title: &str, body: &str) -> Result<(), String> {
+        if command_in_path("terminal-notifier") {
+            return self.send_macos_terminal_notifier(kind, title, body);
+        }
+
+        self.send_macos_osascript(kind, title, body)
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn send_macos_terminal_notifier(
+        &self,
+        kind: NotificationKind,
+        title: &str,
+        body: &str,
+    ) -> Result<(), String> {
+        let subtitle = macos_subtitle(kind);
+        let message = macos_compact_body(kind, body);
+        let group = macos_group(kind);
+
+        let mut command = Command::new("terminal-notifier");
+        command
+            .arg("-title")
+            .arg(title)
+            .arg("-subtitle")
+            .arg(subtitle)
+            .arg("-message")
+            .arg(message)
+            .arg("-group")
+            .arg(group);
+
+        if let Some(sound) = macos_sound(kind) {
+            command.arg("-sound").arg(sound);
+        }
+
+        command.status().map_err(|error| error.to_string()).and_then(|status| {
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("terminal-notifier exited with status {status}"))
+            }
+        })
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn send_macos_osascript(
+        &self,
+        kind: NotificationKind,
+        title: &str,
+        body: &str,
+    ) -> Result<(), String> {
+        let escaped_title = escape_applescript_string(title);
+        let escaped_body = escape_applescript_string(&macos_compact_body(kind, body));
+        let escaped_subtitle = escape_applescript_string(macos_subtitle(kind));
+        let script = format!(
+            "display notification \"{escaped_body}\" with title \"{escaped_title}\" subtitle \"{escaped_subtitle}\""
+        );
 
         Command::new("osascript")
             .arg("-e")
@@ -504,12 +567,89 @@ impl NotificationSender for ShellNotificationSender {
             #[cfg(any(target_os = "linux", test))]
             Platform::Linux => self.send_linux(kind, title, body),
             #[cfg(any(target_os = "macos", test))]
-            Platform::MacOs => self.send_macos(title, body),
+            Platform::MacOs => self.send_macos(kind, title, body),
             #[cfg(any(target_os = "windows", test))]
             Platform::Windows => self.send_windows(title, body),
             Platform::Other => Err("unsupported platform".to_owned()),
         }
     }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_subtitle(kind: NotificationKind) -> &'static str {
+    match kind {
+        NotificationKind::Failure => "Test Failure",
+        NotificationKind::Bailout => "Run Aborted",
+        NotificationKind::SummarySuccess => "Run Summary",
+        NotificationKind::SummaryFailure => "Run Summary",
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_group(kind: NotificationKind) -> &'static str {
+    match kind {
+        NotificationKind::Failure => "tapcue-failure",
+        NotificationKind::Bailout => "tapcue-bailout",
+        NotificationKind::SummarySuccess => "tapcue-summary",
+        NotificationKind::SummaryFailure => "tapcue-summary",
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_sound(kind: NotificationKind) -> Option<&'static str> {
+    match kind {
+        NotificationKind::Bailout => Some("Basso"),
+        NotificationKind::SummaryFailure => Some("Funk"),
+        NotificationKind::Failure | NotificationKind::SummarySuccess => None,
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_compact_body(kind: NotificationKind, body: &str) -> String {
+    match kind {
+        NotificationKind::Failure => compact_failure_body_for_macos(body),
+        NotificationKind::Bailout
+        | NotificationKind::SummarySuccess
+        | NotificationKind::SummaryFailure => body.trim().to_owned(),
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn compact_failure_body_for_macos(body: &str) -> String {
+    let mut test_label: Option<&str> = None;
+    let mut reason: Option<&str> = None;
+    let mut suite: Option<&str> = None;
+
+    for line in body.lines() {
+        if test_label.is_none() {
+            test_label = line.strip_prefix("Test: ");
+        }
+        if reason.is_none() {
+            reason = line.strip_prefix("Reason: ");
+        }
+        if suite.is_none() {
+            suite = line.strip_prefix("Suite: ");
+        }
+    }
+
+    if let Some(label) = test_label {
+        if let Some(reason) = reason {
+            return format!("{label} - {reason}");
+        }
+
+        if let Some(suite) = suite {
+            return format!("{label} ({suite})");
+        }
+
+        return label.to_owned();
+    }
+
+    body.lines().next().unwrap_or_default().trim().to_owned()
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn escape_applescript_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "")
 }
 
 pub struct DesktopNotifier {
@@ -592,9 +732,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::{
-        build_doctor_report, desktop_notifications_available, DesktopNotifier, Environment,
-        FailureNotification, FailureSource, LinuxEnvironmentStatus, NotificationDoctorSignals,
-        NotificationKind, NotificationPolicy, NotificationSender, Platform, PolicyNotifier,
+        build_doctor_report, compact_failure_body_for_macos, desktop_notifications_available,
+        escape_applescript_string, macos_compact_body, macos_group, macos_sound, macos_subtitle,
+        DesktopNotifier, Environment, FailureNotification, FailureSource, LinuxEnvironmentStatus,
+        NotificationDoctorSignals, NotificationKind, NotificationPolicy, NotificationSender,
+        Platform, PolicyNotifier,
     };
     use crate::config::DesktopMode;
     use crate::notifier::Notifier;
@@ -796,6 +938,44 @@ mod tests {
         assert!(rendered.contains("File: server/http_test.go"));
         assert!(rendered.contains("Test: TestHTTP"));
         assert!(rendered.contains("Reason: expected 200, got 500"));
+    }
+
+    #[test]
+    fn macos_failure_body_prefers_test_and_reason() {
+        let full_body =
+            "Runner: go\nSuite: pkg/server\nFile: server/http_test.go\nTest: TestHTTP\nReason: expected 200, got 500";
+        let compact = compact_failure_body_for_macos(full_body);
+        assert_eq!(compact, "TestHTTP - expected 200, got 500");
+    }
+
+    #[test]
+    fn macos_failure_body_falls_back_to_suite_when_reason_missing() {
+        let full_body = "Runner: go\nSuite: pkg/server\nTest: TestHTTP";
+        let compact = compact_failure_body_for_macos(full_body);
+        assert_eq!(compact, "TestHTTP (pkg/server)");
+    }
+
+    #[test]
+    fn macos_compact_body_keeps_summary_readable() {
+        let summary = "status: failure; total: 3; passed: 2; failed: 1";
+        assert_eq!(macos_compact_body(NotificationKind::SummaryFailure, summary), summary);
+    }
+
+    #[test]
+    fn macos_metadata_is_kind_specific() {
+        assert_eq!(macos_subtitle(NotificationKind::Failure), "Test Failure");
+        assert_eq!(macos_subtitle(NotificationKind::Bailout), "Run Aborted");
+        assert_eq!(macos_group(NotificationKind::Failure), "tapcue-failure");
+        assert_eq!(macos_group(NotificationKind::SummarySuccess), "tapcue-summary");
+        assert_eq!(macos_sound(NotificationKind::Failure), None);
+        assert_eq!(macos_sound(NotificationKind::Bailout), Some("Basso"));
+    }
+
+    #[test]
+    fn applescript_escaping_handles_quotes_backslashes_and_newlines() {
+        let raw = "a\"b\\c\nline2\r";
+        let escaped = escape_applescript_string(raw);
+        assert_eq!(escaped, "a\\\"b\\\\c\\nline2");
     }
 
     #[test]

@@ -20,16 +20,15 @@ It is designed for streaming TAP input and incremental parsing. 🦀
 - `jest --json`
 - `vitest --reporter=json`
 
-## Example
+## Runner examples
 
 ```bash
-prove -v t/*.t | tapcue
-```
-
-Or from a file:
-
-```bash
-cat results.tap | tapcue
+go test ./... -json | tapcue
+env NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --message-format libtest-json-plus | tapcue
+npm test --silent | tapcue
+jest --json --outputFile /dev/stdout | tapcue
+vitest run --reporter=json | tapcue
+pytest --tap-stream | tapcue
 ```
 
 ## Install / Build
@@ -135,15 +134,6 @@ tapcue init --current
 
 # overwrite existing .tapcue.toml
 tapcue init --force
-```
-
-## JSON examples
-
-```bash
-go test ./... -json | tapcue
-env NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --message-format libtest-json-plus | tapcue
-jest --json --outputFile /dev/stdout | tapcue
-vitest run --reporter=json | tapcue
 ```
 
 Dogfooding with this repository's tests:

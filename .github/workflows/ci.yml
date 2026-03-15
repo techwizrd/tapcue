@@ -106,10 +106,15 @@ jobs:
           name: tapcue-debug-bin
           path: target/debug/tapcue
 
-  test:
+  rust-matrix:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -131,6 +136,55 @@ jobs:
 
       - name: Tests
         run: cargo test --all-features --locked
+
+  rust-toolchain-linux:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.rust_core == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.allow_failure }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolchain: 1.75.0
+            allow_failure: false
+          - toolchain: stable
+            allow_failure: false
+          - toolchain: nightly
+            allow_failure: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Rust (${{ matrix.toolchain }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cargo check
+        run: cargo check --all-targets --locked
+
+      - name: Cargo test
+        run: cargo test --all-features --locked
+
+  test-linux-extra:
+    needs: [changes, rust-matrix]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.rust_core == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
 
       - name: Stream format fixtures
         run: cargo test --test stream_formats --locked
@@ -174,6 +228,7 @@ jobs:
     needs: [changes, build-tapcue-debug]
     if: github.event_name != 'pull_request' || needs.changes.outputs.integration_rust_nextest == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -207,6 +262,7 @@ jobs:
     needs: [changes, build-tapcue-debug]
     if: github.event_name != 'pull_request' || needs.changes.outputs.integration_go == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -234,6 +290,7 @@ jobs:
     needs: [changes, build-tapcue-debug]
     if: github.event_name != 'pull_request' || needs.changes.outputs.integration_npm_tap == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -263,6 +320,7 @@ jobs:
     needs: [changes, build-tapcue-debug]
     if: github.event_name != 'pull_request' || needs.changes.outputs.integration_jest_json == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -292,6 +350,7 @@ jobs:
     needs: [changes, build-tapcue-debug]
     if: github.event_name != 'pull_request' || needs.changes.outputs.integration_vitest_json == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -321,6 +380,7 @@ jobs:
     needs: [changes, build-tapcue-debug]
     if: github.event_name != 'pull_request' || needs.changes.outputs.integration_python_pytest == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -353,6 +413,7 @@ jobs:
     needs: [changes, build-tapcue-debug]
     if: github.event_name != 'pull_request' || needs.changes.outputs.integration_python_unittest == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -384,8 +445,11 @@ jobs:
   build-release:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs:
-      - test
+      - rust-matrix
+      - rust-toolchain-linux
+      - test-linux-extra
       - integration-rust-nextest
       - integration-go
       - integration-npm-tap
@@ -408,20 +472,46 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
+      - name: Release smoke test
+        run: |
+          target/release/tapcue --help >/dev/null
+          printf 'TAP version 14\n1..1\nok 1 - release-smoke\n' | target/release/tapcue --no-notify --format tap
+          set +e
+          printf '{"Action":"pass","Package":"pkg","Test":"ok"}\n{"Action":"fail","Package":"pkg","Test":"bad"}\n' | target/release/tapcue --no-notify --format json
+          status=$?
+          set -e
+          if [[ $status -ne 1 ]]; then
+            echo "expected release smoke JSON failure exit code 1, got $status"
+            exit 1
+          fi
+
       - name: Package release artifact
+        id: package
         run: |
           mkdir -p dist
           cp target/release/tapcue dist/tapcue
-          tar -C dist -czf dist/tapcue-${{ runner.os }}-${{ github.sha }}.tar.gz tapcue
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            artifact_name="tapcue-${{ runner.os }}-unreleased.tar.gz"
+          else
+            artifact_name="tapcue-${{ runner.os }}-${GITHUB_REF_NAME}.tar.gz"
+          fi
+          tar -C dist -czf "dist/${artifact_name}" tapcue
+          sha256sum "dist/${artifact_name}" > "dist/${artifact_name}.sha256"
+          echo "artifact_path=dist/${artifact_name}" >> "$GITHUB_OUTPUT"
+          echo "artifact_sha_path=dist/${artifact_name}.sha256" >> "$GITHUB_OUTPUT"
 
       - name: Publish prerelease from main
         if: startsWith(github.ref, 'refs/heads/main')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: prerelease-${{ github.sha }}
-          name: tapcue prerelease ${{ github.sha }}
+          tag_name: unreleased
+          name: tapcue unreleased
           prerelease: true
-          files: dist/tapcue-${{ runner.os }}-${{ github.sha }}.tar.gz
+          make_latest: false
+          overwrite_files: true
+          files: |
+            ${{ steps.package.outputs.artifact_path }}
+            ${{ steps.package.outputs.artifact_sha_path }}
 
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -430,4 +520,6 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           prerelease: false
-          files: dist/tapcue-${{ runner.os }}-${{ github.sha }}.tar.gz
+          files: |
+            ${{ steps.package.outputs.artifact_path }}
+            ${{ steps.package.outputs.artifact_sha_path }}

@@ -619,6 +619,7 @@ mod tests {
         };
 
         let cli = Cli {
+            command: None,
             quiet_parse_errors: true,
             strict: true,
             no_quiet_parse_errors: false,
@@ -634,7 +635,6 @@ mod tests {
             trace_detection: true,
             validate_config: false,
             print_effective_config: false,
-            doctor: false,
         };
         cfg.merge_cli(&cli);
 
@@ -673,6 +673,7 @@ mod tests {
         let _env_desktop = ScopedEnv::set("TAPCUE_DESKTOP", "force-off");
 
         let cli = Cli {
+            command: None,
             quiet_parse_errors: true,
             strict: false,
             no_quiet_parse_errors: false,
@@ -688,7 +689,6 @@ mod tests {
             trace_detection: false,
             validate_config: false,
             print_effective_config: false,
-            doctor: false,
         };
 
         let mut cfg = EffectiveConfig::default();
@@ -713,6 +713,7 @@ mod tests {
         assert!(cfg.quiet_parse_errors);
 
         let cli = Cli {
+            command: None,
             quiet_parse_errors: false,
             strict: false,
             no_quiet_parse_errors: true,
@@ -728,7 +729,6 @@ mod tests {
             trace_detection: false,
             validate_config: false,
             print_effective_config: false,
-            doctor: false,
         };
         cfg.merge_cli(&cli);
         assert!(!cfg.quiet_parse_errors);
@@ -845,6 +845,7 @@ mod tests {
         let _env_desktop = ScopedEnv::set("TAPCUE_DESKTOP", "force-off");
 
         let cli = Cli {
+            command: None,
             quiet_parse_errors: false,
             strict: false,
             no_quiet_parse_errors: false,
@@ -860,7 +861,6 @@ mod tests {
             trace_detection: false,
             validate_config: false,
             print_effective_config: false,
-            doctor: false,
         };
 
         let mut cfg = EffectiveConfig::default();

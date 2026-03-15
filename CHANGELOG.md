@@ -11,7 +11,7 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 - Recursive TAP subtest parsing with strict-mode protocol enforcement and TAP13 compatibility.
 - Runner integration checks for Rust, Go, npm TAP, Jest JSON, Vitest JSON, pytest TAP, and unittest TAP.
 - Man page source (`docs/man/tapcue.1`) and TLDR page source (`docs/tldr/tapcue.md`).
-- `--doctor` diagnostics command for desktop notification readiness, config source resolution, and disabled-notification explanations.
+- `tapcue doctor` diagnostics command for desktop notification readiness, config source resolution, and disabled-notification explanations.
 
 ### Changed
 - Line-buffer hot path to indexed extraction/compaction for improved tiny-chunk stream performance.

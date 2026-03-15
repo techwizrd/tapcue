@@ -103,6 +103,74 @@ fn validate_config_exits_success_without_input() {
 }
 
 #[test]
+fn init_writes_default_config_file() {
+    let dir = tempdir().expect("temp dir should create");
+
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("init")
+        .current_dir(dir.path())
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("wrote .tapcue.toml"));
+
+    let content =
+        fs::read_to_string(dir.path().join(".tapcue.toml")).expect("config file should exist");
+    assert!(content.contains("[parser]"));
+    assert!(content.contains("quiet_parse_errors = false"));
+    assert!(content.contains("[notifications]"));
+    assert!(content.contains("enabled = true"));
+}
+
+#[test]
+fn init_current_writes_effective_config() {
+    let dir = tempdir().expect("temp dir should create");
+
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("init")
+        .arg("--current")
+        .current_dir(dir.path())
+        .env("TAPCUE_NO_NOTIFY", "true")
+        .assert()
+        .success();
+
+    let content =
+        fs::read_to_string(dir.path().join(".tapcue.toml")).expect("config file should exist");
+    assert!(content.contains("enabled = false"));
+}
+
+#[test]
+fn init_refuses_to_overwrite_without_force() {
+    let dir = tempdir().expect("temp dir should create");
+    fs::write(dir.path().join(".tapcue.toml"), "[parser]\nstrict = true\n")
+        .expect("existing config should write");
+
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("init")
+        .current_dir(dir.path())
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("already exists"));
+}
+
+#[test]
+fn init_force_overwrites_existing_file() {
+    let dir = tempdir().expect("temp dir should create");
+    let path = dir.path().join(".tapcue.toml");
+    fs::write(&path, "invalid = true\n").expect("existing config should write");
+
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("init")
+        .arg("--force")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(path).expect("config file should exist");
+    assert!(content.contains("[notifications]"));
+    assert!(!content.contains("invalid = true"));
+}
+
+#[test]
 fn summary_json_emits_to_file_destination() {
     let dir = tempdir().expect("temp dir should create");
     let summary_path = dir.path().join("summary.json");
@@ -166,7 +234,7 @@ fn invalid_config_file_fails_with_context() {
 #[test]
 fn doctor_runs_without_input() {
     Command::new(env!("CARGO_BIN_EXE_tapcue"))
-        .arg("--doctor")
+        .arg("doctor")
         .assert()
         .success()
         .stdout(predicates::str::contains("doctor:"))
@@ -176,15 +244,24 @@ fn doctor_runs_without_input() {
 }
 
 #[test]
-fn doctor_explains_cli_disabled_notifications() {
+fn doctor_explains_environment_disabled_notifications() {
     Command::new(env!("CARGO_BIN_EXE_tapcue"))
-        .arg("--doctor")
-        .arg("--no-notify")
+        .arg("doctor")
+        .env("TAPCUE_NO_NOTIFY", "true")
         .assert()
         .success()
         .stdout(predicates::str::contains("action needed"))
         .stdout(predicates::str::contains("notifications.enabled"))
-        .stdout(predicates::str::contains("(source: cli)"))
+        .stdout(predicates::str::contains("(source: environment)"))
         .stdout(predicates::str::contains("reasons:"))
         .stdout(predicates::str::contains("disabled by merged configuration"));
+}
+
+#[test]
+fn doctor_flag_is_not_supported() {
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--doctor")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("unexpected argument '--doctor'"));
 }

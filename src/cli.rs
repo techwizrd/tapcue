@@ -1,10 +1,18 @@
-use clap::{ArgAction, Parser, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 use crate::config::{DesktopMode, InputFormat, SummaryFormat};
 
 #[derive(Debug, Parser)]
-#[command(author, version, about = "Emit desktop notifications from TAP stream")]
+#[command(
+    author,
+    version,
+    about = "Emit desktop notifications from TAP stream",
+    args_conflicts_with_subcommands = true
+)]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<CliCommand>,
+
     #[arg(
         long = "quiet-parse-errors",
         action = ArgAction::SetTrue,
@@ -83,9 +91,44 @@ pub struct Cli {
 
     #[arg(long, default_value_t = false, help = "Print effective merged configuration and exit")]
     pub print_effective_config: bool,
+}
 
-    #[arg(long, default_value_t = false, help = "Check notification readiness and config sources")]
-    pub doctor: bool,
+impl Cli {
+    pub fn without_overrides() -> Self {
+        Self {
+            command: None,
+            quiet_parse_errors: false,
+            strict: false,
+            no_quiet_parse_errors: false,
+            no_notify: false,
+            notify: false,
+            desktop: None,
+            format: None,
+            summary_format: None,
+            summary_file: None,
+            dedup_failures: false,
+            no_dedup_failures: false,
+            max_failure_notifications: None,
+            trace_detection: false,
+            validate_config: false,
+            print_effective_config: false,
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CliCommand {
+    Init(InitCli),
+    Doctor,
+}
+
+#[derive(Debug, Args)]
+pub struct InitCli {
+    #[arg(long, default_value_t = false, help = "Write current effective config")]
+    pub current: bool,
+
+    #[arg(long, default_value_t = false, help = "Overwrite existing .tapcue.toml")]
+    pub force: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -143,7 +186,7 @@ impl From<CliSummaryFormat> for SummaryFormat {
 mod tests {
     use clap::Parser;
 
-    use super::{Cli, CliDesktopMode, CliInputFormat, CliSummaryFormat};
+    use super::{Cli, CliCommand, CliDesktopMode, CliInputFormat, CliSummaryFormat};
     use crate::config::{DesktopMode, InputFormat, SummaryFormat};
 
     #[test]
@@ -167,7 +210,6 @@ mod tests {
             "--trace-detection",
             "--validate-config",
             "--print-effective-config",
-            "--doctor",
         ]);
 
         assert!(cli.quiet_parse_errors);
@@ -182,7 +224,25 @@ mod tests {
         assert!(cli.trace_detection);
         assert!(cli.validate_config);
         assert!(cli.print_effective_config);
-        assert!(cli.doctor);
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn parses_init_subcommand() {
+        let cli = Cli::parse_from(["tapcue", "init", "--current", "--force"]);
+        match cli.command {
+            Some(CliCommand::Init(init)) => {
+                assert!(init.current);
+                assert!(init.force);
+            }
+            _ => panic!("expected init subcommand"),
+        }
+    }
+
+    #[test]
+    fn parses_doctor_subcommand() {
+        let cli = Cli::parse_from(["tapcue", "doctor"]);
+        assert!(matches!(cli.command, Some(CliCommand::Doctor)));
     }
 
     #[test]

@@ -4,10 +4,10 @@ use std::io::IsTerminal;
 use std::io::Write;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Parser;
 
-use tapcue::cli::Cli;
+use tapcue::cli::{Cli, CliCommand, InitCli};
 use tapcue::config::{
     resolved_config_paths, EffectiveConfig, NotificationConfigSources, SummaryFormat,
 };
@@ -20,12 +20,20 @@ use tapcue::{process_stream, AppConfig};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let (effective_config, notification_sources) = EffectiveConfig::load_with_sources(&cli)?;
 
-    if cli.doctor {
-        emit_doctor(&effective_config, &notification_sources);
+    if let Some(command) = &cli.command {
+        match command {
+            CliCommand::Init(init) => run_init(init)?,
+            CliCommand::Doctor => {
+                let (effective_config, notification_sources) =
+                    EffectiveConfig::load_with_sources(&Cli::without_overrides())?;
+                emit_doctor(&effective_config, &notification_sources);
+            }
+        }
         return Ok(());
     }
+
+    let effective_config = EffectiveConfig::load(&cli)?;
 
     if cli.print_effective_config {
         let rendered = effective_config.to_pretty_toml()?;
@@ -69,6 +77,34 @@ fn main() -> Result<()> {
     } else {
         std::process::exit(1);
     }
+}
+
+fn run_init(init: &InitCli) -> Result<()> {
+    let path = Path::new(".tapcue.toml");
+
+    if path.exists() && !init.force {
+        bail!(
+            "tapcue: {} already exists; rerun with `tapcue init --force` to overwrite",
+            path.display()
+        );
+    }
+
+    let config = if init.current {
+        EffectiveConfig::load(&Cli::without_overrides())?
+    } else {
+        EffectiveConfig::default()
+    };
+
+    let rendered = config.to_pretty_toml()?;
+    fs::write(path, rendered)?;
+
+    if init.current {
+        println!("tapcue: wrote {} from current effective config", path.display());
+    } else {
+        println!("tapcue: wrote {} from built-in defaults", path.display());
+    }
+
+    Ok(())
 }
 
 fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {

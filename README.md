@@ -69,7 +69,8 @@ cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue --f
 - `--trace-detection`: print auto format detection decisions
 - `--validate-config`: validate merged config and exit
 - `--print-effective-config`: print merged config and exit
-- `--doctor`: check desktop notification readiness and explain why notifications are disabled
+- `doctor`: check desktop notification readiness and explain why notifications are disabled
+- `init [--current] [--force]`: write `./.tapcue.toml` from defaults or current effective config
 
 ## Configuration
 
@@ -119,6 +120,18 @@ summary_format = "none"
 # summary_file = "tapcue-summary.json"
 ```
 
+Generate a local config file:
+
+```bash
+tapcue init
+
+# include user/local/env merged values
+tapcue init --current
+
+# overwrite existing .tapcue.toml
+tapcue init --force
+```
+
 ## JSON examples
 
 ```bash
@@ -154,7 +167,7 @@ To inspect the final merged settings at runtime:
 ```bash
 tapcue --print-effective-config
 
-tapcue --doctor
+tapcue doctor
 ```
 
 For complete CLI documentation, run:

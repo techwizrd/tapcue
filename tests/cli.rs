@@ -1,6 +1,9 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use assert_cmd::Command;
+use predicates::prelude::*;
 use tempfile::tempdir;
 
 fn fixture(name: &str) -> String {
@@ -264,4 +267,111 @@ fn doctor_flag_is_not_supported() {
         .assert()
         .failure()
         .stderr(predicates::str::contains("unexpected argument '--doctor'"));
+}
+
+#[test]
+fn junit_only_mode_fails_for_failing_report_file() {
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .arg("--junit-file")
+        .arg("tests/fixtures/junit_failure.xml")
+        .arg("--junit-only")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn junit_only_mode_succeeds_for_passing_report_file() {
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .arg("--junit-file")
+        .arg("tests/fixtures/junit_success.xml")
+        .arg("--junit-only")
+        .assert()
+        .success();
+}
+
+#[test]
+fn junit_only_requires_report_inputs() {
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .arg("--junit-only")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("--junit-only requires at least one JUnit report input"));
+}
+
+#[cfg(unix)]
+#[test]
+fn run_mode_auto_discovers_gradle_junit_reports() {
+    let dir = tempdir().expect("temp dir should create");
+    let gradlew = dir.path().join("gradlew");
+    let script = r#"#!/usr/bin/env sh
+set -eu
+mkdir -p build/test-results/test
+cat > build/test-results/test/TEST-sample.xml <<'EOF'
+<testsuite name="sample-suite">
+  <testcase classname="sample.MathTest" name="ok" />
+  <testcase classname="sample.MathTest" name="boom">
+    <failure message="exploded" />
+  </testcase>
+</testsuite>
+EOF
+"#;
+    fs::write(&gradlew, script).expect("gradlew script should write");
+    let mut permissions =
+        fs::metadata(&gradlew).expect("gradlew metadata should read").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&gradlew, permissions).expect("gradlew permissions should set");
+
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .arg("--summary-format")
+        .arg("text")
+        .arg("run")
+        .arg("--")
+        .arg("./gradlew")
+        .arg("test")
+        .current_dir(dir.path())
+        .assert()
+        .failure()
+        .stdout(predicates::str::contains("status=failure"));
+}
+
+#[cfg(unix)]
+#[test]
+fn run_mode_uses_existing_inferred_gradle_report_when_up_to_date() {
+    let dir = tempdir().expect("temp dir should create");
+    let report_dir = dir.path().join("build/test-results/test");
+    fs::create_dir_all(&report_dir).expect("report directory should create");
+    fs::write(
+        report_dir.join("TEST-sample.xml"),
+        "<testsuite name=\"sample-suite\"><testcase classname=\"sample\" name=\"ok\" /></testsuite>",
+    )
+    .expect("report should write");
+
+    let gradlew = dir.path().join("gradlew");
+    let script = r#"#!/usr/bin/env sh
+set -eu
+echo "> Task :app:testDebugUnitTest UP-TO-DATE"
+echo "BUILD SUCCESSFUL in 1s"
+"#;
+    fs::write(&gradlew, script).expect("gradlew script should write");
+    let mut permissions =
+        fs::metadata(&gradlew).expect("gradlew metadata should read").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&gradlew, permissions).expect("gradlew permissions should set");
+
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .arg("--summary-format")
+        .arg("text")
+        .arg("run")
+        .arg("--")
+        .arg("./gradlew")
+        .arg("testDebugUnitTest")
+        .current_dir(dir.path())
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("status=").not());
 }

@@ -148,7 +148,11 @@ impl TapStreamProcessor {
                 return;
             }
 
-            self.finalize_subtest();
+            if self.subtest_lines.is_empty() {
+                self.capturing_subtest = false;
+            } else {
+                self.finalize_subtest();
+            }
         }
 
         if self.in_yaml_block {
@@ -891,5 +895,17 @@ mod tests {
 
         assert!(state.protocol_failures >= 1);
         assert!(!state.is_success());
+    }
+
+    #[test]
+    fn node_tap_subtest_headings_without_indented_bodies_are_supported() {
+        let input = "TAP version 13\n# Subtest: alpha\nok 1 - alpha\n  ---\n  duration_ms: 1.0\n  ...\n# Subtest: beta\nok 2 - beta\n  ---\n  duration_ms: 1.0\n  ...\n1..2\n";
+        let (state, _notifier) = process_input(input);
+
+        assert_eq!(state.total, 2);
+        assert_eq!(state.passed, 2);
+        assert_eq!(state.failed, 0);
+        assert_eq!(state.protocol_failures, 0);
+        assert!(state.is_success());
     }
 }

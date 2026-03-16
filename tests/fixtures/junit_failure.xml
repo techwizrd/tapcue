@@ -1,0 +1,6 @@
+<testsuite name="kmp-suite">
+  <testcase classname="sample.MathTest" name="adds" />
+  <testcase classname="sample.MathTest" name="divides">
+    <failure message="division by zero">stacktrace here</failure>
+  </testcase>
+</testsuite>

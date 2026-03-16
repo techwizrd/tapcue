@@ -7,6 +7,12 @@
 - `json`
 - `bun`
 
+JUnit XML is ingested from explicit report paths/globs via CLI flags
+(`--junit-file`, `--junit-dir`, `--junit-glob`) rather than stdin auto-detection.
+In `tapcue run -- ...` mode, JUnit auto-discovery defaults are applied for
+common tools (`gradle`/`gradlew`, `mvn`/`mvnw`) unless disabled with
+`--no-auto-junit-reports`.
+
 ## How `auto` works
 
 `auto` inspects incoming stream content line-by-line and picks a parser once it has a strong signal.

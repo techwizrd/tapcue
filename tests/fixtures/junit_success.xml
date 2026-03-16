@@ -1,0 +1,4 @@
+<testsuite name="kmp-suite">
+  <testcase classname="sample.MathTest" name="adds" />
+  <testcase classname="sample.MathTest" name="subtracts" />
+</testsuite>

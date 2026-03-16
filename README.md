@@ -40,6 +40,7 @@ Or let `tapcue` run a command and capture both stdout+stderr itself:
 ```bash
 tapcue run -- bun test
 tapcue run -- go test ./... -json
+tapcue --junit-dir build/test-results run -- ./gradlew test
 ```
 
 ## Install / Build
@@ -74,6 +75,12 @@ cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue --f
 - `--format <auto|tap|json|bun>`: input parsing format (default: `auto`)
 - `--summary-format <none|text|json>`: emit run summary for automation
 - `--summary-file <path|->`: write summary output to a file or stdout (`-`)
+- `--junit-file <path>`: ingest one JUnit XML report file (repeatable)
+- `--junit-dir <path>`: ingest all `*.xml` JUnit report files under directory (repeatable)
+- `--junit-glob <pattern>`: ingest JUnit XML report files via glob (repeatable)
+- `--junit-only`: skip stdin parser and use only JUnit reports
+- `--auto-junit-reports` / `--no-auto-junit-reports`: control run-mode JUnit auto-discovery
+- `--run-output <split|merged|off>`: passthrough behavior for `tapcue run -- ...`
 - `--dedup-failures` / `--no-dedup-failures`: control repeated failure notifications
 - `--max-failure-notifications <N>`: cap emitted failure notifications per run
 - `--trace-detection`: print auto format detection decisions
@@ -108,6 +115,12 @@ Supported environment variables:
 - `TAPCUE_DEDUP_FAILURES` (`true/false`)
 - `TAPCUE_MAX_FAILURE_NOTIFICATIONS` (integer)
 - `TAPCUE_TRACE_DETECTION` (`true/false`)
+- `TAPCUE_JUNIT_FILE` (comma-separated paths)
+- `TAPCUE_JUNIT_DIR` (comma-separated directories)
+- `TAPCUE_JUNIT_GLOB` (comma-separated glob patterns)
+- `TAPCUE_JUNIT_ONLY` (`true/false`)
+- `TAPCUE_AUTO_JUNIT_REPORTS` (`true/false`)
+- `TAPCUE_RUN_OUTPUT` (`split`, `merged`, `off`)
 
 macOS notification backend notes:
 
@@ -139,6 +152,16 @@ max_failure_notifications = 20
 [output]
 summary_format = "none"
 # summary_file = "tapcue-summary.json"
+
+[run]
+output = "split"
+
+[junit]
+file = []
+dir = []
+glob = []
+only = false
+auto_reports = true
 ```
 
 Generate a local config file:
@@ -163,6 +186,15 @@ Automation-friendly summary example:
 
 ```bash
 go test ./... -json | tapcue --summary-format json --summary-file run-summary.json
+
+# JUnit XML report file ingestion
+tapcue --junit-file build/test-results/test/TEST-com.example.MathTest.xml --junit-only
+tapcue --junit-dir build/test-results --junit-only
+tapcue --junit-glob "**/surefire-reports/TEST-*.xml" --junit-only
+
+# run mode can auto-discover Gradle/Maven JUnit reports
+tapcue run -- ./gradlew test
+tapcue run -- mvn test
 ```
 
 CI-oriented mode (no desktop notifications, emit machine-readable summary):

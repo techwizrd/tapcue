@@ -9,6 +9,7 @@ pub mod bun_stream;
 pub mod cli;
 pub mod config;
 pub mod json_stream;
+pub mod junit_reports;
 pub(crate) mod line_buffer;
 pub mod notifier;
 pub mod processor;

@@ -1,6 +1,6 @@
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
-use crate::config::{DesktopMode, InputFormat, SummaryFormat};
+use crate::config::{DesktopMode, InputFormat, RunOutputMode, SummaryFormat};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about = "Emit desktop notifications from TAP stream")]
@@ -59,6 +59,37 @@ pub struct Cli {
     #[arg(long, help = "Write run summary to file path")]
     pub summary_file: Option<String>,
 
+    #[arg(long, value_name = "PATH", help = "Ingest JUnit XML report file", action = ArgAction::Append)]
+    pub junit_file: Vec<String>,
+
+    #[arg(long, value_name = "DIR", help = "Ingest all JUnit XML reports under directory", action = ArgAction::Append)]
+    pub junit_dir: Vec<String>,
+
+    #[arg(long, value_name = "GLOB", help = "Ingest JUnit XML reports matching glob", action = ArgAction::Append)]
+    pub junit_glob: Vec<String>,
+
+    #[arg(long, default_value_t = false, help = "Skip stdin parsing and use only JUnit reports")]
+    pub junit_only: bool,
+
+    #[arg(long, value_enum, help = "Runner output passthrough in run mode")]
+    pub run_output: Option<CliRunOutputMode>,
+
+    #[arg(
+        long,
+        action = ArgAction::SetTrue,
+        conflicts_with = "no_auto_junit_reports",
+        help = "Auto-discover common JUnit report paths in run mode"
+    )]
+    pub auto_junit_reports: bool,
+
+    #[arg(
+        long,
+        action = ArgAction::SetTrue,
+        conflicts_with = "auto_junit_reports",
+        help = "Disable run-mode JUnit report auto-discovery"
+    )]
+    pub no_auto_junit_reports: bool,
+
     #[arg(
         long,
         action = ArgAction::SetTrue,
@@ -101,6 +132,13 @@ impl Cli {
             format: None,
             summary_format: None,
             summary_file: None,
+            junit_file: Vec::new(),
+            junit_dir: Vec::new(),
+            junit_glob: Vec::new(),
+            junit_only: false,
+            run_output: None,
+            auto_junit_reports: false,
+            no_auto_junit_reports: false,
             dedup_failures: false,
             no_dedup_failures: false,
             max_failure_notifications: None,
@@ -155,6 +193,13 @@ pub enum CliSummaryFormat {
     Json,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum CliRunOutputMode {
+    Split,
+    Merged,
+    Off,
+}
+
 impl From<CliDesktopMode> for DesktopMode {
     fn from(value: CliDesktopMode) -> Self {
         match value {
@@ -186,12 +231,24 @@ impl From<CliSummaryFormat> for SummaryFormat {
     }
 }
 
+impl From<CliRunOutputMode> for RunOutputMode {
+    fn from(value: CliRunOutputMode) -> Self {
+        match value {
+            CliRunOutputMode::Split => RunOutputMode::Split,
+            CliRunOutputMode::Merged => RunOutputMode::Merged,
+            CliRunOutputMode::Off => RunOutputMode::Off,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
 
-    use super::{Cli, CliCommand, CliDesktopMode, CliInputFormat, CliSummaryFormat};
-    use crate::config::{DesktopMode, InputFormat, SummaryFormat};
+    use super::{
+        Cli, CliCommand, CliDesktopMode, CliInputFormat, CliRunOutputMode, CliSummaryFormat,
+    };
+    use crate::config::{DesktopMode, InputFormat, RunOutputMode, SummaryFormat};
 
     #[test]
     fn parses_flags_and_options() {
@@ -208,6 +265,16 @@ mod tests {
             "text",
             "--summary-file",
             "-",
+            "--junit-file",
+            "report.xml",
+            "--junit-dir",
+            "build/test-results",
+            "--junit-glob",
+            "**/junit/*.xml",
+            "--junit-only",
+            "--run-output",
+            "merged",
+            "--no-auto-junit-reports",
             "--dedup-failures",
             "--max-failure-notifications",
             "12",
@@ -223,6 +290,12 @@ mod tests {
         assert_eq!(cli.format, Some(CliInputFormat::Json));
         assert_eq!(cli.summary_format, Some(CliSummaryFormat::Text));
         assert_eq!(cli.summary_file.as_deref(), Some("-"));
+        assert_eq!(cli.junit_file, vec!["report.xml"]);
+        assert_eq!(cli.junit_dir, vec!["build/test-results"]);
+        assert_eq!(cli.junit_glob, vec!["**/junit/*.xml"]);
+        assert!(cli.junit_only);
+        assert_eq!(cli.run_output, Some(CliRunOutputMode::Merged));
+        assert!(cli.no_auto_junit_reports);
         assert!(cli.dedup_failures);
         assert_eq!(cli.max_failure_notifications, Some(12));
         assert!(cli.trace_detection);
@@ -274,5 +347,9 @@ mod tests {
         assert!(matches!(SummaryFormat::from(CliSummaryFormat::None), SummaryFormat::None));
         assert!(matches!(SummaryFormat::from(CliSummaryFormat::Text), SummaryFormat::Text));
         assert!(matches!(SummaryFormat::from(CliSummaryFormat::Json), SummaryFormat::Json));
+
+        assert!(matches!(RunOutputMode::from(CliRunOutputMode::Split), RunOutputMode::Split));
+        assert!(matches!(RunOutputMode::from(CliRunOutputMode::Merged), RunOutputMode::Merged));
+        assert!(matches!(RunOutputMode::from(CliRunOutputMode::Off), RunOutputMode::Off));
     }
 }

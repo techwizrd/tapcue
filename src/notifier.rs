@@ -14,6 +14,7 @@ pub enum FailureSource {
     Jest,
     Vitest,
     Bun,
+    Junit,
 }
 
 impl FailureSource {
@@ -25,6 +26,7 @@ impl FailureSource {
             Self::Jest => "jest",
             Self::Vitest => "vitest",
             Self::Bun => "bun",
+            Self::Junit => "junit",
         }
     }
 }

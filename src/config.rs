@@ -109,6 +109,15 @@ pub enum SummaryFormat {
     Json,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RunOutputMode {
+    #[default]
+    Split,
+    Merged,
+    Off,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct EffectiveConfig {
     pub quiet_parse_errors: bool,
@@ -118,6 +127,12 @@ pub struct EffectiveConfig {
     pub input_format: InputFormat,
     pub summary_format: SummaryFormat,
     pub summary_file: Option<PathBuf>,
+    pub run_output: RunOutputMode,
+    pub junit_file: Vec<PathBuf>,
+    pub junit_dir: Vec<PathBuf>,
+    pub junit_glob: Vec<String>,
+    pub junit_only: bool,
+    pub auto_junit_reports: bool,
     pub dedup_failures: bool,
     pub max_failure_notifications: Option<usize>,
     pub trace_detection: bool,
@@ -133,6 +148,12 @@ impl Default for EffectiveConfig {
             input_format: InputFormat::Auto,
             summary_format: SummaryFormat::None,
             summary_file: None,
+            run_output: RunOutputMode::Split,
+            junit_file: Vec::new(),
+            junit_dir: Vec::new(),
+            junit_glob: Vec::new(),
+            junit_only: false,
+            auto_junit_reports: true,
             dedup_failures: true,
             max_failure_notifications: None,
             trace_detection: false,
@@ -150,6 +171,10 @@ struct FileConfig {
     notifications: NotificationsConfig,
     #[serde(default)]
     output: OutputConfig,
+    #[serde(default)]
+    junit: JunitConfig,
+    #[serde(default)]
+    run: RunConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -175,6 +200,20 @@ struct NotificationsConfig {
 struct OutputConfig {
     summary_format: Option<SummaryFormat>,
     summary_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct JunitConfig {
+    file: Option<Vec<PathBuf>>,
+    dir: Option<Vec<PathBuf>>,
+    glob: Option<Vec<String>>,
+    only: Option<bool>,
+    auto_reports: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RunConfig {
+    output: Option<RunOutputMode>,
 }
 
 impl EffectiveConfig {
@@ -270,6 +309,30 @@ impl EffectiveConfig {
             self.summary_file = Some(value);
         }
 
+        if let Some(value) = file_config.run.output {
+            self.run_output = value;
+        }
+
+        if let Some(value) = file_config.junit.file {
+            self.junit_file = value;
+        }
+
+        if let Some(value) = file_config.junit.dir {
+            self.junit_dir = value;
+        }
+
+        if let Some(value) = file_config.junit.glob {
+            self.junit_glob = value;
+        }
+
+        if let Some(value) = file_config.junit.only {
+            self.junit_only = value;
+        }
+
+        if let Some(value) = file_config.junit.auto_reports {
+            self.auto_junit_reports = value;
+        }
+
         Ok(())
     }
 
@@ -319,6 +382,30 @@ impl EffectiveConfig {
             if !trimmed.is_empty() {
                 self.summary_file = Some(PathBuf::from(trimmed));
             }
+        }
+
+        if let Some(value) = read_env_path_list("TAPCUE_JUNIT_FILE") {
+            self.junit_file = value;
+        }
+
+        if let Some(value) = read_env_path_list("TAPCUE_JUNIT_DIR") {
+            self.junit_dir = value;
+        }
+
+        if let Some(value) = read_env_string_list("TAPCUE_JUNIT_GLOB") {
+            self.junit_glob = value;
+        }
+
+        if let Some(value) = read_env_bool("TAPCUE_JUNIT_ONLY") {
+            self.junit_only = value;
+        }
+
+        if let Some(value) = read_env_run_output_mode("TAPCUE_RUN_OUTPUT") {
+            self.run_output = value;
+        }
+
+        if let Some(value) = read_env_bool("TAPCUE_AUTO_JUNIT_REPORTS") {
+            self.auto_junit_reports = value;
         }
 
         if let Some(value) = read_env_bool("TAPCUE_DEDUP_FAILURES") {
@@ -391,6 +478,34 @@ impl EffectiveConfig {
             self.summary_file = Some(PathBuf::from(value));
         }
 
+        if !cli.junit_file.is_empty() {
+            self.junit_file = cli.junit_file.iter().map(PathBuf::from).collect();
+        }
+
+        if !cli.junit_dir.is_empty() {
+            self.junit_dir = cli.junit_dir.iter().map(PathBuf::from).collect();
+        }
+
+        if !cli.junit_glob.is_empty() {
+            self.junit_glob = cli.junit_glob.clone();
+        }
+
+        if cli.junit_only {
+            self.junit_only = true;
+        }
+
+        if let Some(value) = cli.run_output {
+            self.run_output = value.into();
+        }
+
+        if cli.auto_junit_reports {
+            self.auto_junit_reports = true;
+        }
+
+        if cli.no_auto_junit_reports {
+            self.auto_junit_reports = false;
+        }
+
         if cli.dedup_failures {
             self.dedup_failures = true;
         }
@@ -425,6 +540,14 @@ impl EffectiveConfig {
                 summary_format: self.summary_format,
                 summary_file: self.summary_file.clone(),
             },
+            run: RenderedRunConfig { output: self.run_output },
+            junit: RenderedJunitConfig {
+                file: self.junit_file.clone(),
+                dir: self.junit_dir.clone(),
+                glob: self.junit_glob.clone(),
+                only: self.junit_only,
+                auto_reports: self.auto_junit_reports,
+            },
         };
 
         toml::to_string_pretty(&rendered).context("failed to render effective config as TOML")
@@ -451,6 +574,8 @@ struct RenderedConfig {
     input: RenderedInputConfig,
     notifications: RenderedNotificationsConfig,
     output: RenderedOutputConfig,
+    run: RenderedRunConfig,
+    junit: RenderedJunitConfig,
 }
 
 #[derive(Serialize)]
@@ -476,6 +601,20 @@ struct RenderedNotificationsConfig {
 struct RenderedOutputConfig {
     summary_format: SummaryFormat,
     summary_file: Option<PathBuf>,
+}
+
+#[derive(Serialize)]
+struct RenderedJunitConfig {
+    file: Vec<PathBuf>,
+    dir: Vec<PathBuf>,
+    glob: Vec<String>,
+    only: bool,
+    auto_reports: bool,
+}
+
+#[derive(Serialize)]
+struct RenderedRunConfig {
+    output: RunOutputMode,
 }
 
 fn user_config_path() -> Option<PathBuf> {
@@ -535,6 +674,19 @@ fn read_env_summary_format(key: &str) -> Option<SummaryFormat> {
     }
 }
 
+fn read_env_run_output_mode(key: &str) -> Option<RunOutputMode> {
+    let value = env::var(key).ok()?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "split" => Some(RunOutputMode::Split),
+        "merged" => Some(RunOutputMode::Merged),
+        "off" => Some(RunOutputMode::Off),
+        _ => {
+            eprintln!("tapcue: invalid run output mode in {key}: {value}");
+            None
+        }
+    }
+}
+
 fn read_env_usize(key: &str) -> Option<usize> {
     let value = env::var(key).ok()?;
     match value.trim().parse::<usize>() {
@@ -544,6 +696,22 @@ fn read_env_usize(key: &str) -> Option<usize> {
             None
         }
     }
+}
+
+fn read_env_string_list(key: &str) -> Option<Vec<String>> {
+    let value = env::var(key).ok()?;
+    let values = value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    Some(values)
+}
+
+fn read_env_path_list(key: &str) -> Option<Vec<PathBuf>> {
+    read_env_string_list(key)
+        .map(|entries| entries.into_iter().map(PathBuf::from).collect::<Vec<_>>())
 }
 
 #[cfg(test)]
@@ -557,7 +725,7 @@ mod tests {
 
     use super::{
         ConfigSource, DesktopMode, EffectiveConfig, InputFormat, NotificationConfigSources,
-        SummaryFormat,
+        RunOutputMode, SummaryFormat,
     };
     use crate::cli::Cli;
 
@@ -616,6 +784,12 @@ mod tests {
             input_format: InputFormat::Tap,
             summary_format: SummaryFormat::None,
             summary_file: None,
+            run_output: RunOutputMode::Split,
+            junit_file: Vec::new(),
+            junit_dir: Vec::new(),
+            junit_glob: Vec::new(),
+            junit_only: false,
+            auto_junit_reports: true,
             dedup_failures: true,
             max_failure_notifications: None,
             trace_detection: false,
@@ -632,6 +806,13 @@ mod tests {
             format: Some(crate::cli::CliInputFormat::Json),
             summary_format: Some(crate::cli::CliSummaryFormat::Json),
             summary_file: Some("summary.json".to_owned()),
+            junit_file: Vec::new(),
+            junit_dir: Vec::new(),
+            junit_glob: Vec::new(),
+            junit_only: false,
+            run_output: None,
+            auto_junit_reports: false,
+            no_auto_junit_reports: false,
             dedup_failures: false,
             no_dedup_failures: true,
             max_failure_notifications: Some(4),
@@ -686,6 +867,13 @@ mod tests {
             format: Some(crate::cli::CliInputFormat::Auto),
             summary_format: None,
             summary_file: None,
+            junit_file: Vec::new(),
+            junit_dir: Vec::new(),
+            junit_glob: Vec::new(),
+            junit_only: false,
+            run_output: None,
+            auto_junit_reports: false,
+            no_auto_junit_reports: false,
             dedup_failures: false,
             no_dedup_failures: false,
             max_failure_notifications: None,
@@ -726,6 +914,13 @@ mod tests {
             format: None,
             summary_format: None,
             summary_file: None,
+            junit_file: Vec::new(),
+            junit_dir: Vec::new(),
+            junit_glob: Vec::new(),
+            junit_only: false,
+            run_output: None,
+            auto_junit_reports: false,
+            no_auto_junit_reports: false,
             dedup_failures: false,
             no_dedup_failures: false,
             max_failure_notifications: None,
@@ -755,6 +950,12 @@ mod tests {
         let _dedup = ScopedEnv::set("TAPCUE_DEDUP_FAILURES", "false");
         let _max_fail = ScopedEnv::set("TAPCUE_MAX_FAILURE_NOTIFICATIONS", "3");
         let _trace = ScopedEnv::set("TAPCUE_TRACE_DETECTION", "true");
+        let _junit_file = ScopedEnv::set("TAPCUE_JUNIT_FILE", "a.xml,b.xml");
+        let _junit_dir = ScopedEnv::set("TAPCUE_JUNIT_DIR", "build/test-results");
+        let _junit_glob = ScopedEnv::set("TAPCUE_JUNIT_GLOB", "**/TEST-*.xml");
+        let _junit_only = ScopedEnv::set("TAPCUE_JUNIT_ONLY", "true");
+        let _auto_junit = ScopedEnv::set("TAPCUE_AUTO_JUNIT_REPORTS", "false");
+        let _run_output = ScopedEnv::set("TAPCUE_RUN_OUTPUT", "off");
 
         let mut cfg = EffectiveConfig::default();
         cfg.merge_env();
@@ -764,6 +965,12 @@ mod tests {
         assert!(!cfg.dedup_failures);
         assert_eq!(cfg.max_failure_notifications, Some(3));
         assert!(cfg.trace_detection);
+        assert_eq!(cfg.junit_file, vec![PathBuf::from("a.xml"), PathBuf::from("b.xml")]);
+        assert_eq!(cfg.junit_dir, vec![PathBuf::from("build/test-results")]);
+        assert_eq!(cfg.junit_glob, vec!["**/TEST-*.xml"]);
+        assert!(cfg.junit_only);
+        assert!(!cfg.auto_junit_reports);
+        assert_eq!(cfg.run_output, RunOutputMode::Off);
     }
 
     #[test]
@@ -815,6 +1022,12 @@ mod tests {
             input_format: InputFormat::Json,
             summary_format: SummaryFormat::Json,
             summary_file: Some(PathBuf::from("out.json")),
+            run_output: RunOutputMode::Split,
+            junit_file: Vec::new(),
+            junit_dir: Vec::new(),
+            junit_glob: Vec::new(),
+            junit_only: false,
+            auto_junit_reports: true,
             dedup_failures: true,
             max_failure_notifications: Some(10),
             trace_detection: false,
@@ -832,6 +1045,8 @@ mod tests {
         assert!(rendered.contains("[output]"));
         assert!(rendered.contains("summary_format = \"json\""));
         assert!(rendered.contains("summary_file = \"out.json\""));
+        assert!(rendered.contains("[junit]"));
+        assert!(rendered.contains("auto_reports = true"));
         assert!(rendered.contains("enabled = true"));
         assert!(rendered.contains("desktop = \"force-on\""));
     }
@@ -858,6 +1073,13 @@ mod tests {
             format: None,
             summary_format: None,
             summary_file: None,
+            junit_file: Vec::new(),
+            junit_dir: Vec::new(),
+            junit_glob: Vec::new(),
+            junit_only: false,
+            run_output: None,
+            auto_junit_reports: false,
+            no_auto_junit_reports: false,
             dedup_failures: false,
             no_dedup_failures: false,
             max_failure_notifications: None,

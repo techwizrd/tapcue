@@ -3,18 +3,21 @@ use std::io;
 use std::io::IsTerminal;
 use std::io::Read;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
+use std::time::SystemTime;
 
 use anyhow::{bail, Result};
 use clap::Parser;
 
 use tapcue::cli::{Cli, CliCommand, InitCli, RunCli};
 use tapcue::config::{
-    resolved_config_paths, EffectiveConfig, NotificationConfigSources, SummaryFormat,
+    resolved_config_paths, EffectiveConfig, InputFormat, NotificationConfigSources, RunOutputMode,
+    SummaryFormat,
 };
+use tapcue::junit_reports::ingest_junit_file;
 use tapcue::notifier::{
     doctor_notifications, DesktopNotifier, NotificationPolicy, Notifier, NullNotifier,
     PolicyNotifier,
@@ -73,18 +76,81 @@ fn main() -> Result<()> {
         trace_detection: effective_config.trace_detection,
     };
 
-    let (state, child_status) = match &cli.command {
+    let inferred_runner_for_run = match &cli.command {
         Some(CliCommand::Run(run_cli)) => {
-            let (state, status) = run_and_process(run_cli, &mut notifier, app_config)?;
-            (state, Some(status))
+            if effective_config.auto_junit_reports
+                && effective_config.junit_file.is_empty()
+                && effective_config.junit_dir.is_empty()
+                && effective_config.junit_glob.is_empty()
+            {
+                infer_junit_globs_for_command(run_cli).0
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    let skip_stream_parse_for_inferred_junit = inferred_runner_for_run.is_some()
+        && !effective_config.junit_only
+        && matches!(effective_config.input_format, InputFormat::Auto);
+
+    let (mut state, child_status, run_started_at) = match &cli.command {
+        Some(CliCommand::Run(run_cli)) => {
+            let started_at = SystemTime::now();
+            let (state, status) = if effective_config.junit_only
+                || skip_stream_parse_for_inferred_junit
+            {
+                let status = run_and_wait(run_cli)?;
+                (empty_state(), status)
+            } else {
+                run_and_process(run_cli, &mut notifier, app_config, effective_config.run_output)?
+            };
+            (state, Some(status), Some(started_at))
         }
         _ => {
-            let state = process_stream(io::stdin().lock(), &mut notifier, app_config)?;
-            (state, None)
+            let state = if effective_config.junit_only {
+                empty_state()
+            } else {
+                process_stream(io::stdin().lock(), &mut notifier, app_config)?
+            };
+            (state, None, None)
         }
     };
 
-    emit_summary(&effective_config, &state)?;
+    let run_command = match &cli.command {
+        Some(CliCommand::Run(run_cli)) => Some(run_cli),
+        _ => None,
+    };
+
+    let junit_reports = resolve_junit_report_files(
+        &effective_config,
+        run_command,
+        run_started_at,
+        effective_config.trace_detection,
+    )?;
+    if effective_config.junit_only && junit_reports.files.is_empty() {
+        bail!("tapcue: --junit-only requires at least one JUnit report input");
+    }
+    let junit_state = ingest_junit_reports(
+        &junit_reports.files,
+        &mut notifier,
+        effective_config.quiet_parse_errors,
+        effective_config.trace_detection,
+    );
+
+    if should_prefer_inferred_junit(&state, &junit_state, &junit_reports) {
+        state = empty_state();
+    }
+
+    merge_run_state(&mut state, &junit_state);
+
+    let suppress_summary = junit_reports.inferred_runner.is_some()
+        && junit_reports.matched_existing_but_unmodified
+        && junit_state.total == 0;
+    if !suppress_summary {
+        emit_summary(&effective_config, &state)?;
+    }
 
     if let Some(status) = child_status {
         if let Some(code) = status.code() {
@@ -103,10 +169,28 @@ fn main() -> Result<()> {
     }
 }
 
+fn run_and_wait(run_cli: &RunCli) -> Result<std::process::ExitStatus> {
+    let program = run_cli
+        .command
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("tapcue: run command is required"))?;
+    let args = &run_cli.command[1..];
+
+    let status = Command::new(program)
+        .args(args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    Ok(status)
+}
+
 fn run_and_process(
     run_cli: &RunCli,
     notifier: &mut dyn Notifier,
     app_config: AppConfig,
+    run_output: RunOutputMode,
 ) -> Result<(RunState, std::process::ExitStatus)> {
     let program = run_cli
         .command
@@ -130,7 +214,7 @@ fn run_and_process(
         .take()
         .ok_or_else(|| anyhow::anyhow!("tapcue: failed to capture child stderr"))?;
 
-    let merged = MergedReader::new(stdout, stderr);
+    let merged = MergedReader::new(stdout, stderr, run_output);
     let state = process_stream(merged, notifier, app_config)?;
     let status = child.wait()?;
 
@@ -138,23 +222,28 @@ fn run_and_process(
 }
 
 struct MergedReader {
-    rx: Receiver<Vec<u8>>,
+    rx: Receiver<StreamChunk>,
     current: std::io::Cursor<Vec<u8>>,
+    run_output: RunOutputMode,
 }
 
 impl MergedReader {
-    fn new(stdout: std::process::ChildStdout, stderr: std::process::ChildStderr) -> Self {
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    fn new(
+        stdout: std::process::ChildStdout,
+        stderr: std::process::ChildStderr,
+        run_output: RunOutputMode,
+    ) -> Self {
+        let (tx, rx) = mpsc::channel::<StreamChunk>();
 
         let stdout_tx = tx.clone();
-        thread::spawn(move || pump_reader(stdout, stdout_tx));
+        thread::spawn(move || pump_reader(stdout, StreamSource::Stdout, stdout_tx));
 
         let stderr_tx = tx.clone();
-        thread::spawn(move || pump_reader(stderr, stderr_tx));
+        thread::spawn(move || pump_reader(stderr, StreamSource::Stderr, stderr_tx));
 
         drop(tx);
 
-        Self { rx, current: std::io::Cursor::new(Vec::new()) }
+        Self { rx, current: std::io::Cursor::new(Vec::new()), run_output }
     }
 }
 
@@ -169,7 +258,8 @@ impl Read for MergedReader {
 
             match self.rx.recv() {
                 Ok(chunk) => {
-                    self.current = std::io::Cursor::new(chunk);
+                    self.mirror_chunk(&chunk)?;
+                    self.current = std::io::Cursor::new(chunk.bytes);
                 }
                 Err(_) => return Ok(0),
             }
@@ -177,19 +267,250 @@ impl Read for MergedReader {
     }
 }
 
-fn pump_reader<R: Read + Send + 'static>(mut reader: R, tx: mpsc::Sender<Vec<u8>>) {
+impl MergedReader {
+    fn mirror_chunk(&self, chunk: &StreamChunk) -> io::Result<()> {
+        match self.run_output {
+            RunOutputMode::Off => Ok(()),
+            RunOutputMode::Split => match chunk.source {
+                StreamSource::Stdout => io::stdout().write_all(&chunk.bytes),
+                StreamSource::Stderr => io::stderr().write_all(&chunk.bytes),
+            },
+            RunOutputMode::Merged => io::stdout().write_all(&chunk.bytes),
+        }
+    }
+}
+
+fn pump_reader<R: Read + Send + 'static>(
+    mut reader: R,
+    source: StreamSource,
+    tx: mpsc::Sender<StreamChunk>,
+) {
     let mut buffer = [0_u8; 8192];
 
     loop {
         match reader.read(&mut buffer) {
             Ok(0) => break,
             Ok(read) => {
-                if tx.send(buffer[..read].to_vec()).is_err() {
+                let chunk = StreamChunk { source, bytes: buffer[..read].to_vec() };
+                if tx.send(chunk).is_err() {
                     break;
                 }
             }
             Err(_) => break,
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum StreamSource {
+    Stdout,
+    Stderr,
+}
+
+struct StreamChunk {
+    source: StreamSource,
+    bytes: Vec<u8>,
+}
+
+fn resolve_junit_report_files(
+    config: &EffectiveConfig,
+    run_command: Option<&RunCli>,
+    run_started_at: Option<SystemTime>,
+    trace_detection: bool,
+) -> Result<JunitReportResolution> {
+    let mut files = Vec::new();
+
+    for file in &config.junit_file {
+        files.push(file.clone());
+    }
+
+    for dir_path in &config.junit_dir {
+        let pattern = format!("{}/**/*.xml", dir_path.display());
+        for entry in glob::glob(&pattern)? {
+            match entry {
+                Ok(path) if path.is_file() => files.push(path),
+                Ok(_) => {}
+                Err(error) => {
+                    return Err(anyhow::anyhow!(
+                        "tapcue: invalid JUnit directory expansion for {dir}: {error}",
+                        dir = dir_path.display()
+                    ));
+                }
+            }
+        }
+    }
+
+    for pattern in &config.junit_glob {
+        for entry in glob::glob(pattern)? {
+            match entry {
+                Ok(path) if path.is_file() => files.push(path),
+                Ok(_) => {}
+                Err(error) => {
+                    return Err(anyhow::anyhow!(
+                        "tapcue: invalid JUnit glob match for {pattern}: {error}"
+                    ));
+                }
+            }
+        }
+    }
+
+    let mut inferred_runner = None;
+    if files.is_empty() && config.auto_junit_reports {
+        if let Some(run_cli) = run_command {
+            let (runner, inferred_globs) = infer_junit_globs_for_command(run_cli);
+            inferred_runner = runner;
+            if trace_detection && !inferred_globs.is_empty() {
+                eprintln!("tapcue: inferred JUnit report globs: {}", inferred_globs.join(", "));
+            }
+
+            for pattern in inferred_globs {
+                for path in glob::glob(&pattern)?.flatten() {
+                    if path.is_file() {
+                        files.push(path);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut matched_existing_but_unmodified = false;
+    if inferred_runner.is_some() {
+        if let Some(started_at) = run_started_at {
+            let pre_filter_count = files.len();
+            files.retain(|path| {
+                fs::metadata(path)
+                    .and_then(|metadata| metadata.modified())
+                    .map(|modified| modified >= started_at)
+                    .unwrap_or(false)
+            });
+
+            if files.is_empty() && pre_filter_count > 0 {
+                matched_existing_but_unmodified = true;
+                if trace_detection {
+                    eprintln!(
+                        "tapcue: inferred JUnit reports exist but none were modified in this run"
+                    );
+                }
+            }
+        }
+    }
+
+    files.sort();
+    files.dedup();
+    Ok(JunitReportResolution { files, inferred_runner, matched_existing_but_unmodified })
+}
+
+fn infer_junit_globs_for_command(run_cli: &RunCli) -> (Option<InferredJunitRunner>, Vec<String>) {
+    let Some(program) = run_cli.command.first() else {
+        return (None, Vec::new());
+    };
+
+    let executable = Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+
+    if executable == "gradle" || executable == "gradlew" {
+        return (
+            Some(InferredJunitRunner::Gradle),
+            vec!["**/build/test-results/**/*.xml".to_owned()],
+        );
+    }
+
+    if executable == "mvn" || executable == "mvnw" {
+        return (
+            Some(InferredJunitRunner::Maven),
+            vec![
+                "**/target/surefire-reports/TEST-*.xml".to_owned(),
+                "**/target/failsafe-reports/TEST-*.xml".to_owned(),
+            ],
+        );
+    }
+
+    (None, Vec::new())
+}
+
+fn should_prefer_inferred_junit(
+    stream_state: &RunState,
+    junit_state: &RunState,
+    junit_reports: &JunitReportResolution,
+) -> bool {
+    junit_reports.inferred_runner.is_some()
+        && junit_state.total > 0
+        && stream_state.total == 0
+        && stream_state.failed == 0
+        && stream_state.protocol_failures > 0
+}
+
+struct JunitReportResolution {
+    files: Vec<PathBuf>,
+    inferred_runner: Option<InferredJunitRunner>,
+    matched_existing_but_unmodified: bool,
+}
+
+#[derive(Clone, Copy)]
+enum InferredJunitRunner {
+    Gradle,
+    Maven,
+}
+
+fn ingest_junit_reports(
+    junit_files: &[PathBuf],
+    notifier: &mut dyn Notifier,
+    quiet_parse_errors: bool,
+    trace_detection: bool,
+) -> RunState {
+    let mut state = empty_state();
+
+    for file in junit_files {
+        if trace_detection {
+            eprintln!("tapcue: ingesting JUnit XML report: {}", file.display());
+        }
+
+        match ingest_junit_file(file, notifier) {
+            Ok(parsed) => merge_run_state(&mut state, &parsed),
+            Err(error) => {
+                state.parse_warning_count += 1;
+                if !quiet_parse_errors {
+                    eprintln!("tapcue: parse warning: {error}");
+                }
+            }
+        }
+    }
+
+    state
+}
+
+fn merge_run_state(state: &mut RunState, add: &RunState) {
+    if add.total > 0 {
+        state.planned = None;
+    }
+
+    state.total += add.total;
+    state.passed += add.passed;
+    state.failed += add.failed;
+    state.todo += add.todo;
+    state.skipped += add.skipped;
+    state.parse_warning_count += add.parse_warning_count;
+    state.protocol_failures += add.protocol_failures;
+
+    if state.bailout_reason.is_none() {
+        state.bailout_reason = add.bailout_reason.clone();
+    }
+}
+
+fn empty_state() -> RunState {
+    RunState {
+        planned: None,
+        total: 0,
+        passed: 0,
+        failed: 0,
+        todo: 0,
+        skipped: 0,
+        bailout_reason: None,
+        parse_warning_count: 0,
+        protocol_failures: 0,
     }
 }
 
@@ -544,7 +865,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{emit_summary, render_json_summary, render_text_summary, summary_destination};
-    use tapcue::config::{DesktopMode, EffectiveConfig, InputFormat, SummaryFormat};
+    use tapcue::config::{DesktopMode, EffectiveConfig, InputFormat, RunOutputMode, SummaryFormat};
     use tapcue::processor::RunState;
 
     fn sample_state() -> RunState {
@@ -570,6 +891,12 @@ mod tests {
             input_format: InputFormat::Tap,
             summary_format: SummaryFormat::None,
             summary_file: None,
+            run_output: RunOutputMode::Split,
+            junit_file: Vec::new(),
+            junit_dir: Vec::new(),
+            junit_glob: Vec::new(),
+            junit_only: false,
+            auto_junit_reports: true,
             dedup_failures: true,
             max_failure_notifications: None,
             trace_detection: false,

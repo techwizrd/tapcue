@@ -79,6 +79,8 @@ cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue --f
 - `--no-notify`: disable desktop notifications (useful in CI/tests)
 - `--notify`: force desktop notifications on
 - `--desktop <auto|force-on|force-off>`: override desktop notification detection
+- `--no-project-context`: omit project name from notification bodies
+- `--project-label <label>`: override project label shown in notifications
 - `--format <auto|tap|json|bun>`: input parsing format (default: `auto`)
 - `--summary-format <none|text|json>`: emit run summary for automation
 - `--summary-file <path|->`: write summary output to a file or stdout (`-`)
@@ -117,6 +119,8 @@ Supported environment variables:
 - `TAPCUE_NO_NOTIFY` (`true/false`)
 - `TAPCUE_NOTIFICATIONS_ENABLED` (`true/false`)
 - `TAPCUE_DESKTOP` (`auto`, `force-on`, `force-off`)
+- `TAPCUE_PROJECT_CONTEXT` (`true/false`)
+- `TAPCUE_PROJECT_LABEL` (string)
 - `TAPCUE_FORMAT` (`auto`, `tap`, `json`, `bun`)
 - `TAPCUE_SUMMARY_FORMAT` (`none`, `text`, `json`)
 - `TAPCUE_SUMMARY_FILE` (path)
@@ -155,6 +159,8 @@ format = "auto"
 [notifications]
 enabled = true
 desktop = "auto"
+include_project_context = true
+# project_label = "my-repo"
 dedup_failures = true
 max_failure_notifications = 20
 

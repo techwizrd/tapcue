@@ -50,6 +50,16 @@ pub struct Cli {
     #[arg(long, value_enum, help = "Desktop notification mode override")]
     pub desktop: Option<CliDesktopMode>,
 
+    #[arg(
+        long,
+        action = ArgAction::SetTrue,
+        help = "Disable project context in notification bodies"
+    )]
+    pub no_project_context: bool,
+
+    #[arg(long, value_name = "LABEL", help = "Override project label in notifications")]
+    pub project_label: Option<String>,
+
     #[arg(long, value_enum, help = "Input format (default: auto)")]
     pub format: Option<CliInputFormat>,
 
@@ -145,6 +155,8 @@ impl Cli {
             no_notify: false,
             notify: false,
             desktop: None,
+            no_project_context: false,
+            project_label: None,
             format: None,
             summary_format: None,
             summary_file: None,
@@ -277,6 +289,9 @@ mod tests {
             "--notify",
             "--desktop",
             "force-on",
+            "--no-project-context",
+            "--project-label",
+            "monorepo-a",
             "--format",
             "json",
             "--summary-format",
@@ -306,6 +321,8 @@ mod tests {
         assert!(cli.strict);
         assert!(cli.notify);
         assert_eq!(cli.desktop, Some(CliDesktopMode::ForceOn));
+        assert!(cli.no_project_context);
+        assert_eq!(cli.project_label.as_deref(), Some("monorepo-a"));
         assert_eq!(cli.format, Some(CliInputFormat::Json));
         assert_eq!(cli.summary_format, Some(CliSummaryFormat::Text));
         assert_eq!(cli.summary_file.as_deref(), Some("-"));

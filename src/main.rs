@@ -59,7 +59,10 @@ fn main() -> Result<()> {
     let mut base_notifier: Box<dyn Notifier> = if effective_config.no_notify {
         Box::new(NullNotifier)
     } else {
-        Box::new(DesktopNotifier::new(effective_config.desktop_mode))
+        Box::new(DesktopNotifier::new(
+            effective_config.desktop_mode,
+            resolve_project_label(&effective_config),
+        ))
     };
     let mut notifier = PolicyNotifier::new(
         base_notifier.as_mut(),
@@ -191,6 +194,28 @@ fn main() -> Result<()> {
     } else {
         std::process::exit(1);
     }
+}
+
+fn resolve_project_label(config: &EffectiveConfig) -> Option<String> {
+    if !config.include_project_context {
+        return None;
+    }
+
+    if let Some(label) = config.project_label.as_ref() {
+        let trimmed = label.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_owned());
+        }
+    }
+
+    let cwd = std::env::current_dir().ok()?;
+    let basename = cwd
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .map(ToOwned::to_owned);
+
+    basename.or_else(|| Some(cwd.display().to_string()))
 }
 
 #[derive(Clone, Debug)]
@@ -1111,6 +1136,8 @@ mod tests {
             strict: false,
             no_notify: true,
             desktop_mode: DesktopMode::Auto,
+            include_project_context: true,
+            project_label: None,
             input_format: InputFormat::Tap,
             summary_format: SummaryFormat::None,
             summary_file: None,

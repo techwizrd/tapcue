@@ -691,21 +691,23 @@ fn escape_applescript_string(value: &str) -> String {
 
 pub struct DesktopNotifier {
     enabled: bool,
+    project_label: Option<String>,
     sender: Box<dyn NotificationSender>,
 }
 
 impl Default for DesktopNotifier {
     fn default() -> Self {
-        Self::new(DesktopMode::Auto)
+        Self::new(DesktopMode::Auto, None)
     }
 }
 
 impl DesktopNotifier {
-    pub fn new(mode: DesktopMode) -> Self {
+    pub fn new(mode: DesktopMode, project_label: Option<String>) -> Self {
         let platform = current_platform();
         Self::with_components(
             platform,
             mode,
+            project_label,
             Box::new(ProcessEnvironment),
             Box::new(ShellNotificationSender::new(platform)),
         )
@@ -714,6 +716,7 @@ impl DesktopNotifier {
     fn with_components(
         platform: Platform,
         mode: DesktopMode,
+        project_label: Option<String>,
         environment: Box<dyn Environment>,
         sender: Box<dyn NotificationSender>,
     ) -> Self {
@@ -722,7 +725,21 @@ impl DesktopNotifier {
             DesktopMode::ForceOff => false,
             DesktopMode::Auto => desktop_notifications_available(platform, environment.as_ref()),
         };
-        Self { enabled, sender }
+        Self { enabled, project_label, sender }
+    }
+
+    fn with_project_context(&self, body: &str) -> String {
+        match self.project_label.as_deref() {
+            Some(label) => format!("{body}\nProject: {label}"),
+            None => body.to_owned(),
+        }
+    }
+
+    fn title_with_project_context(&self, title: &str) -> String {
+        match self.project_label.as_deref() {
+            Some(label) => format!("{title} - {label}"),
+            None => title.to_owned(),
+        }
     }
 
     fn send_notification(&self, kind: NotificationKind, title: &str, body: &str) {
@@ -739,12 +756,13 @@ impl DesktopNotifier {
 impl Notifier for DesktopNotifier {
     fn notify_failure(&mut self, failure: &FailureNotification) {
         let title = format!("{} failure", failure.source.as_str());
-        let body = failure.render_body();
+        let body = self.with_project_context(&failure.render_body());
         self.send_notification(NotificationKind::Failure, &title, &body);
     }
 
     fn notify_bailout(&mut self, reason: &str) {
-        self.send_notification(NotificationKind::Bailout, "TAP bailout", reason);
+        let body = self.with_project_context(reason);
+        self.send_notification(NotificationKind::Bailout, "TAP bailout", &body);
     }
 
     fn notify_summary(&mut self, state: &RunState) {
@@ -758,7 +776,8 @@ impl Notifier for DesktopNotifier {
         } else {
             NotificationKind::SummaryFailure
         };
-        self.send_notification(kind, "TAP summary", &body);
+        let title = self.title_with_project_context("Run summary");
+        self.send_notification(kind, &title, &body);
     }
 }
 
@@ -876,6 +895,7 @@ mod tests {
         let mut notifier = DesktopNotifier::with_components(
             Platform::Linux,
             DesktopMode::Auto,
+            None,
             Box::new(FakeEnvironment::new(&[])),
             Box::new(sender),
         );
@@ -893,6 +913,7 @@ mod tests {
         let mut notifier = DesktopNotifier::with_components(
             Platform::Linux,
             DesktopMode::Auto,
+            None,
             Box::new(FakeEnvironment::new(&[("DISPLAY", ":0")])),
             Box::new(sender),
         );
@@ -911,7 +932,7 @@ mod tests {
         assert_eq!(notifications[1].1, "TAP bailout");
         assert_eq!(notifications[1].2, "catastrophic");
         assert_eq!(notifications[2].0, NotificationKind::SummaryFailure);
-        assert_eq!(notifications[2].1, "TAP summary");
+        assert_eq!(notifications[2].1, "Run summary");
         assert!(notifications[2].2.contains("status: failure"));
     }
 
@@ -921,6 +942,7 @@ mod tests {
         let mut force_on = DesktopNotifier::with_components(
             Platform::Linux,
             DesktopMode::ForceOn,
+            None,
             Box::new(FakeEnvironment::new(&[])),
             Box::new(sender_on),
         );
@@ -931,6 +953,7 @@ mod tests {
         let mut force_off = DesktopNotifier::with_components(
             Platform::Linux,
             DesktopMode::ForceOff,
+            None,
             Box::new(FakeEnvironment::new(&[("DISPLAY", ":0")])),
             Box::new(sender_off),
         );
@@ -944,6 +967,7 @@ mod tests {
         let mut desktop = DesktopNotifier::with_components(
             Platform::Linux,
             DesktopMode::ForceOn,
+            None,
             Box::new(FakeEnvironment::new(&[])),
             Box::new(sender),
         );
@@ -1021,6 +1045,7 @@ mod tests {
         let mut desktop = DesktopNotifier::with_components(
             Platform::Linux,
             DesktopMode::ForceOn,
+            None,
             Box::new(FakeEnvironment::new(&[])),
             Box::new(sender),
         );
@@ -1042,6 +1067,7 @@ mod tests {
         let mut notifier = DesktopNotifier::with_components(
             Platform::Linux,
             DesktopMode::ForceOn,
+            None,
             Box::new(FakeEnvironment::new(&[])),
             Box::new(FailingSender),
         );
@@ -1057,6 +1083,7 @@ mod tests {
         let mut desktop = DesktopNotifier::with_components(
             Platform::Linux,
             DesktopMode::ForceOn,
+            None,
             Box::new(FakeEnvironment::new(&[])),
             Box::new(sender),
         );
@@ -1077,6 +1104,7 @@ mod tests {
         let mut desktop = DesktopNotifier::with_components(
             Platform::Linux,
             DesktopMode::ForceOn,
+            None,
             Box::new(FakeEnvironment::new(&[])),
             Box::new(sender),
         );
@@ -1090,7 +1118,7 @@ mod tests {
         assert_eq!(notifications[0].0, NotificationKind::Bailout);
         assert_eq!(notifications[0].1, "TAP bailout");
         assert_eq!(notifications[1].0, NotificationKind::SummaryFailure);
-        assert_eq!(notifications[1].1, "TAP summary");
+        assert_eq!(notifications[1].1, "Run summary");
     }
 
     #[test]
@@ -1099,6 +1127,7 @@ mod tests {
         let mut notifier = DesktopNotifier::with_components(
             Platform::Linux,
             DesktopMode::ForceOn,
+            None,
             Box::new(FakeEnvironment::new(&[])),
             Box::new(sender),
         );
@@ -1120,7 +1149,26 @@ mod tests {
         let notifications = shared.lock().expect("lock should not be poisoned");
         assert_eq!(notifications.len(), 1);
         assert_eq!(notifications[0].0, NotificationKind::SummarySuccess);
-        assert_eq!(notifications[0].1, "TAP summary");
+        assert_eq!(notifications[0].1, "Run summary");
+    }
+
+    #[test]
+    fn summary_includes_project_context_when_configured() {
+        let (sender, shared) = RecordingSender::shared();
+        let mut notifier = DesktopNotifier::with_components(
+            Platform::Linux,
+            DesktopMode::ForceOn,
+            Some("tapcue".to_owned()),
+            Box::new(FakeEnvironment::new(&[])),
+            Box::new(sender),
+        );
+
+        notifier.notify_summary(&sample_state());
+
+        let notifications = shared.lock().expect("lock should not be poisoned");
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].1, "Run summary - tapcue");
+        assert!(!notifications[0].2.contains("Project:"));
     }
 
     #[test]
@@ -1129,6 +1177,7 @@ mod tests {
         let mut desktop = DesktopNotifier::with_components(
             Platform::Linux,
             DesktopMode::ForceOn,
+            None,
             Box::new(FakeEnvironment::new(&[])),
             Box::new(sender),
         );

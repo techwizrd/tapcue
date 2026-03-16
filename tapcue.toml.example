@@ -7,6 +7,8 @@ format = "auto"
 [notifications]
 enabled = true
 desktop = "auto"
+include_project_context = true
+# project_label = "my-repo"
 dedup_failures = true
 # max_failure_notifications = 20
 

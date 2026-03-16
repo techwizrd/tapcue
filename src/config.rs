@@ -124,6 +124,8 @@ pub struct EffectiveConfig {
     pub strict: bool,
     pub no_notify: bool,
     pub desktop_mode: DesktopMode,
+    pub include_project_context: bool,
+    pub project_label: Option<String>,
     pub input_format: InputFormat,
     pub summary_format: SummaryFormat,
     pub summary_file: Option<PathBuf>,
@@ -146,6 +148,8 @@ impl Default for EffectiveConfig {
             strict: false,
             no_notify: false,
             desktop_mode: DesktopMode::Auto,
+            include_project_context: true,
+            project_label: None,
             input_format: InputFormat::Auto,
             summary_format: SummaryFormat::None,
             summary_file: None,
@@ -194,6 +198,8 @@ struct InputConfig {
 struct NotificationsConfig {
     enabled: Option<bool>,
     desktop: Option<DesktopMode>,
+    include_project_context: Option<bool>,
+    project_label: Option<String>,
     dedup_failures: Option<bool>,
     max_failure_notifications: Option<usize>,
 }
@@ -292,6 +298,14 @@ impl EffectiveConfig {
             }
         }
 
+        if let Some(value) = file_config.notifications.include_project_context {
+            self.include_project_context = value;
+        }
+
+        if let Some(value) = file_config.notifications.project_label {
+            self.project_label = if value.trim().is_empty() { None } else { Some(value) };
+        }
+
         if let Some(value) = file_config.notifications.dedup_failures {
             self.dedup_failures = value;
         }
@@ -373,6 +387,17 @@ impl EffectiveConfig {
             self.desktop_mode = value;
             if let Some(sources) = notification_sources.as_mut() {
                 sources.desktop = ConfigSource::Environment;
+            }
+        }
+
+        if let Some(value) = read_env_bool("TAPCUE_PROJECT_CONTEXT") {
+            self.include_project_context = value;
+        }
+
+        if let Ok(value) = env::var("TAPCUE_PROJECT_LABEL") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.project_label = Some(trimmed.to_owned());
             }
         }
 
@@ -477,6 +502,17 @@ impl EffectiveConfig {
             }
         }
 
+        if cli.no_project_context {
+            self.include_project_context = false;
+        }
+
+        if let Some(value) = &cli.project_label {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.project_label = Some(trimmed.to_owned());
+            }
+        }
+
         if let Some(value) = cli.format {
             self.input_format = value.into();
         }
@@ -552,6 +588,8 @@ impl EffectiveConfig {
             notifications: RenderedNotificationsConfig {
                 enabled: !self.no_notify,
                 desktop: self.desktop_mode,
+                include_project_context: self.include_project_context,
+                project_label: self.project_label.clone(),
                 dedup_failures: self.dedup_failures,
                 max_failure_notifications: self.max_failure_notifications,
             },
@@ -615,6 +653,8 @@ struct RenderedInputConfig {
 struct RenderedNotificationsConfig {
     enabled: bool,
     desktop: DesktopMode,
+    include_project_context: bool,
+    project_label: Option<String>,
     dedup_failures: bool,
     max_failure_notifications: Option<usize>,
 }
@@ -804,6 +844,8 @@ mod tests {
             strict: false,
             no_notify: true,
             desktop_mode: DesktopMode::ForceOff,
+            include_project_context: true,
+            project_label: None,
             input_format: InputFormat::Tap,
             summary_format: SummaryFormat::None,
             summary_file: None,
@@ -827,6 +869,8 @@ mod tests {
             no_notify: false,
             notify: true,
             desktop: Some(crate::cli::CliDesktopMode::Auto),
+            no_project_context: true,
+            project_label: Some("workspace-x".to_owned()),
             format: Some(crate::cli::CliInputFormat::Json),
             summary_format: Some(crate::cli::CliSummaryFormat::Json),
             summary_file: Some("summary.json".to_owned()),
@@ -852,6 +896,8 @@ mod tests {
         assert!(cfg.strict);
         assert!(!cfg.no_notify);
         assert_eq!(cfg.desktop_mode, DesktopMode::Auto);
+        assert!(!cfg.include_project_context);
+        assert_eq!(cfg.project_label.as_deref(), Some("workspace-x"));
         assert_eq!(cfg.input_format, InputFormat::Json);
         assert_eq!(cfg.summary_format, SummaryFormat::Json);
         assert_eq!(cfg.summary_file.as_deref(), Some(Path::new("summary.json")));
@@ -890,6 +936,8 @@ mod tests {
             no_notify: true,
             notify: false,
             desktop: Some(crate::cli::CliDesktopMode::Auto),
+            no_project_context: false,
+            project_label: None,
             format: Some(crate::cli::CliInputFormat::Auto),
             summary_format: None,
             summary_file: None,
@@ -939,6 +987,8 @@ mod tests {
             no_notify: false,
             notify: false,
             desktop: None,
+            no_project_context: false,
+            project_label: None,
             format: None,
             summary_format: None,
             summary_file: None,
@@ -987,6 +1037,8 @@ mod tests {
         let _auto_junit = ScopedEnv::set("TAPCUE_AUTO_JUNIT_REPORTS", "false");
         let _run_output = ScopedEnv::set("TAPCUE_RUN_OUTPUT", "off");
         let _auto_runner_adapt = ScopedEnv::set("TAPCUE_AUTO_RUNNER_ADAPT", "false");
+        let _project_context = ScopedEnv::set("TAPCUE_PROJECT_CONTEXT", "false");
+        let _project_label = ScopedEnv::set("TAPCUE_PROJECT_LABEL", "repo-env");
 
         let mut cfg = EffectiveConfig::default();
         cfg.merge_env();
@@ -1003,6 +1055,8 @@ mod tests {
         assert!(!cfg.auto_junit_reports);
         assert_eq!(cfg.run_output, RunOutputMode::Off);
         assert!(!cfg.auto_runner_adapt);
+        assert!(!cfg.include_project_context);
+        assert_eq!(cfg.project_label.as_deref(), Some("repo-env"));
     }
 
     #[test]
@@ -1051,6 +1105,8 @@ mod tests {
             strict: true,
             no_notify: false,
             desktop_mode: DesktopMode::ForceOn,
+            include_project_context: true,
+            project_label: Some("repo-a".to_owned()),
             input_format: InputFormat::Json,
             summary_format: SummaryFormat::Json,
             summary_file: Some(PathBuf::from("out.json")),
@@ -1073,6 +1129,8 @@ mod tests {
         assert!(rendered.contains("[input]"));
         assert!(rendered.contains("format = \"json\""));
         assert!(rendered.contains("[notifications]"));
+        assert!(rendered.contains("include_project_context = true"));
+        assert!(rendered.contains("project_label = \"repo-a\""));
         assert!(rendered.contains("dedup_failures = true"));
         assert!(rendered.contains("max_failure_notifications = 10"));
         assert!(rendered.contains("[output]"));
@@ -1105,6 +1163,8 @@ mod tests {
             no_notify: true,
             notify: false,
             desktop: Some(crate::cli::CliDesktopMode::Auto),
+            no_project_context: false,
+            project_label: None,
             format: None,
             summary_format: None,
             summary_file: None,

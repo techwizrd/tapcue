@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+#[cfg(any(target_os = "linux", test))]
 use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
@@ -201,6 +202,7 @@ fn current_platform() -> Platform {
 }
 
 trait Environment {
+    #[cfg(any(target_os = "linux", test))]
     fn var_os(&self, key: &str) -> Option<OsString>;
 }
 
@@ -208,12 +210,16 @@ trait Environment {
 struct ProcessEnvironment;
 
 impl Environment for ProcessEnvironment {
+    #[cfg(any(target_os = "linux", test))]
     fn var_os(&self, key: &str) -> Option<OsString> {
         std::env::var_os(key)
     }
 }
 
 fn desktop_notifications_available(platform: Platform, env: &dyn Environment) -> bool {
+    #[cfg(not(any(target_os = "linux", test)))]
+    let _ = env;
+
     match platform {
         #[cfg(any(target_os = "linux", test))]
         Platform::Linux => linux_environment_ready(LinuxEnvironmentStatus {
@@ -252,6 +258,7 @@ pub struct NotificationDoctorReport {
 #[derive(Debug, Clone, Copy)]
 struct NotificationDoctorSignals {
     platform: Platform,
+    #[cfg(any(target_os = "linux", test))]
     linux_environment: LinuxEnvironmentStatus,
     backend_found: bool,
 }
@@ -260,6 +267,7 @@ pub fn doctor_notifications(no_notify: bool, mode: DesktopMode) -> NotificationD
     let platform = current_platform();
     let signals = NotificationDoctorSignals {
         platform,
+        #[cfg(any(target_os = "linux", test))]
         linux_environment: LinuxEnvironmentStatus {
             display: std::env::var_os("DISPLAY").is_some(),
             wayland_display: std::env::var_os("WAYLAND_DISPLAY").is_some(),
@@ -428,6 +436,7 @@ impl ShellNotificationSender {
         }
     }
 
+    #[cfg(any(target_os = "linux", test))]
     fn send_linux(&self, kind: NotificationKind, title: &str, body: &str) -> Result<(), String> {
         let (urgency, icon, expire_ms, stack_key, category) = match kind {
             NotificationKind::Failure => (
@@ -600,6 +609,9 @@ fn detect_macos_backend(platform: Platform) -> Option<MacOsBackend> {
 
 impl NotificationSender for ShellNotificationSender {
     fn send(&self, kind: NotificationKind, title: &str, body: &str) -> Result<(), String> {
+        #[cfg(target_os = "windows")]
+        let _ = kind;
+
         match self.platform {
             #[cfg(any(target_os = "linux", test))]
             Platform::Linux => self.send_linux(kind, title, body),

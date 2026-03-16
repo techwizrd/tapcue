@@ -351,9 +351,7 @@ fn generated_pytest_report_path(started_at: SystemTime) -> PathBuf {
 }
 
 fn pytest_argument_insert_index(command: &[String]) -> Option<usize> {
-    let Some(program) = command.first() else {
-        return None;
-    };
+    let program = command.first()?;
 
     let executable = Path::new(program)
         .file_name()
@@ -391,17 +389,7 @@ fn pytest_argument_insert_index(command: &[String]) -> Option<usize> {
 }
 
 fn run_and_wait(run_command: &ResolvedRunCommand) -> Result<std::process::ExitStatus> {
-    let program = run_command
-        .command
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("tapcue: run command is required"))?;
-    let args = &run_command.command[1..];
-
-    let mut command = Command::new(program);
-    command.args(args);
-    for (key, value) in &run_command.env_overrides {
-        command.env(key, value);
-    }
+    let mut command = build_run_command(run_command)?;
 
     let status = command
         .stdin(Stdio::inherit())
@@ -418,17 +406,7 @@ fn run_and_process(
     app_config: AppConfig,
     run_output: RunOutputMode,
 ) -> Result<(RunState, std::process::ExitStatus)> {
-    let program = run_command
-        .command
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("tapcue: run command is required"))?;
-    let args = &run_command.command[1..];
-
-    let mut command = Command::new(program);
-    command.args(args);
-    for (key, value) in &run_command.env_overrides {
-        command.env(key, value);
-    }
+    let mut command = build_run_command(run_command)?;
 
     let mut child =
         command.stdin(Stdio::inherit()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
@@ -447,6 +425,22 @@ fn run_and_process(
     let status = child.wait()?;
 
     Ok((state, status))
+}
+
+fn build_run_command(run_command: &ResolvedRunCommand) -> Result<Command> {
+    let program = run_command
+        .command
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("tapcue: run command is required"))?;
+    let args = &run_command.command[1..];
+
+    let mut command = Command::new(program);
+    command.args(args);
+    for (key, value) in &run_command.env_overrides {
+        command.env(key, value);
+    }
+
+    Ok(command)
 }
 
 struct MergedReader {
@@ -547,43 +541,8 @@ fn resolve_junit_report_files(
     run_started_at: Option<SystemTime>,
     trace_detection: bool,
 ) -> Result<JunitReportResolution> {
-    let mut files = Vec::new();
-
+    let mut files = collect_configured_junit_files(config)?;
     files.extend_from_slice(inferred_junit_files);
-
-    for file in &config.junit_file {
-        files.push(file.clone());
-    }
-
-    for dir_path in &config.junit_dir {
-        let pattern = format!("{}/**/*.xml", dir_path.display());
-        for entry in glob::glob(&pattern)? {
-            match entry {
-                Ok(path) if path.is_file() => files.push(path),
-                Ok(_) => {}
-                Err(error) => {
-                    return Err(anyhow::anyhow!(
-                        "tapcue: invalid JUnit directory expansion for {dir}: {error}",
-                        dir = dir_path.display()
-                    ));
-                }
-            }
-        }
-    }
-
-    for pattern in &config.junit_glob {
-        for entry in glob::glob(pattern)? {
-            match entry {
-                Ok(path) if path.is_file() => files.push(path),
-                Ok(_) => {}
-                Err(error) => {
-                    return Err(anyhow::anyhow!(
-                        "tapcue: invalid JUnit glob match for {pattern}: {error}"
-                    ));
-                }
-            }
-        }
-    }
 
     let has_explicit_inputs = !config.junit_file.is_empty()
         || !config.junit_dir.is_empty()
@@ -599,11 +558,7 @@ fn resolve_junit_report_files(
             }
 
             for pattern in inferred_globs {
-                for path in glob::glob(&pattern)?.flatten() {
-                    if path.is_file() {
-                        files.push(path);
-                    }
-                }
+                collect_glob_matches(&pattern, &mut files)?;
             }
         }
     }
@@ -632,6 +587,40 @@ fn resolve_junit_report_files(
     files.sort();
     files.dedup();
     Ok(JunitReportResolution { files, inferred_runner, matched_existing_but_unmodified })
+}
+
+fn collect_configured_junit_files(config: &EffectiveConfig) -> Result<Vec<PathBuf>> {
+    let mut files = config.junit_file.clone();
+
+    for dir_path in &config.junit_dir {
+        let pattern = format!("{}/**/*.xml", dir_path.display());
+        collect_glob_matches(&pattern, &mut files).map_err(|error| {
+            anyhow::anyhow!(
+                "tapcue: invalid JUnit directory expansion for {dir}: {error}",
+                dir = dir_path.display()
+            )
+        })?;
+    }
+
+    for pattern in &config.junit_glob {
+        collect_glob_matches(pattern, &mut files).map_err(|error| {
+            anyhow::anyhow!("tapcue: invalid JUnit glob match for {pattern}: {error}")
+        })?;
+    }
+
+    Ok(files)
+}
+
+fn collect_glob_matches(pattern: &str, files: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in glob::glob(pattern)? {
+        match entry {
+            Ok(path) if path.is_file() => files.push(path),
+            Ok(_) => {}
+            Err(error) => return Err(anyhow::anyhow!(error.to_string())),
+        }
+    }
+
+    Ok(())
 }
 
 fn is_fresh_report(modified: SystemTime, started_at: SystemTime) -> bool {
@@ -794,25 +783,40 @@ fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
         if report.ready { color.green("✓ ready") } else { color.red("✗ action needed") };
     println!("doctor: {status}");
 
+    emit_doctor_settings(&color, &report, sources);
+    emit_doctor_checks(&color, &report);
+    emit_doctor_env(&color, &report);
+    emit_doctor_backend(&color, &report);
+    emit_doctor_config(config, &report, &paths);
+    emit_doctor_reasons(&color, &report);
+}
+
+fn emit_doctor_settings(
+    color: &DoctorColor,
+    report: &tapcue::notifier::NotificationDoctorReport,
+    sources: &NotificationConfigSources,
+) {
     print_section("settings");
     print_state_row(
-        &color,
+        color,
         report.notifications_enabled,
         "notifications.enabled",
         &format!("{} (source: {})", report.notifications_enabled, sources.enabled.as_str()),
     );
     print_state_row(
-        &color,
+        color,
         true,
         "notifications.desktop",
         &format!("{} (source: {})", report.desktop_mode.as_str(), sources.desktop.as_str()),
     );
     print_neutral_row("platform", report.platform);
+}
 
+fn emit_doctor_checks(color: &DoctorColor, report: &tapcue::notifier::NotificationDoctorReport) {
     print_section("checks");
     let check_notifications_enabled = report.notifications_enabled;
     print_check_row(
-        &color,
+        color,
         "notifications_enabled",
         check_notifications_enabled,
         if check_notifications_enabled { "pass" } else { "fail" },
@@ -820,7 +824,7 @@ fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
 
     let check_desktop_mode = report.desktop_mode != tapcue::config::DesktopMode::ForceOff;
     print_check_row(
-        &color,
+        color,
         "desktop_mode_allows_notifications",
         check_desktop_mode,
         if check_desktop_mode { "pass" } else { "fail (desktop mode is force-off)" },
@@ -831,34 +835,38 @@ fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
     } else {
         true
     };
+    let auto_environment_detail = if report.desktop_mode == tapcue::config::DesktopMode::Auto {
+        if check_auto_environment {
+            "pass"
+        } else {
+            "fail"
+        }
+    } else {
+        "pass (not required in force mode)"
+    };
     print_check_row(
-        &color,
+        color,
         "desktop_environment_ready",
         check_auto_environment,
-        if report.desktop_mode == tapcue::config::DesktopMode::Auto {
-            if check_auto_environment {
-                "pass"
-            } else {
-                "fail"
-            }
-        } else {
-            "pass (not required in force mode)"
-        },
+        auto_environment_detail,
     );
 
     let check_backend_available = report.backend_command.is_some() && report.backend_found;
     print_check_row(
-        &color,
+        color,
         "backend_available",
         check_backend_available,
         if check_backend_available { "pass" } else { "fail" },
     );
+}
+
+fn emit_doctor_env(color: &DoctorColor, report: &tapcue::notifier::NotificationDoctorReport) {
     if let Some(linux_env) = report.linux_environment {
         print_section("env");
         if report.auto_environment_ready {
-            print_ok_row(&color, "auto.environment_ready", "true");
+            print_ok_row(color, "auto.environment_ready", "true");
         } else {
-            print_warn_row(&color, "auto.environment_ready", "false");
+            print_warn_row(color, "auto.environment_ready", "false");
         }
         print_neutral_row("env.DISPLAY", if linux_env.display { "set" } else { "unset" });
         print_neutral_row(
@@ -870,6 +878,9 @@ fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
             if linux_env.dbus_session_bus_address { "set" } else { "unset" },
         );
     }
+}
+
+fn emit_doctor_backend(color: &DoctorColor, report: &tapcue::notifier::NotificationDoctorReport) {
     print_section("backend");
     if let Some(command) = report.backend_command {
         print_neutral_row("backend.command", command);
@@ -877,13 +888,20 @@ fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
         print_neutral_row("backend.command", "none");
     }
     if report.backend_found {
-        print_ok_row(&color, "backend.found", "true");
+        print_ok_row(color, "backend.found", "true");
     } else {
-        print_warn_row(&color, "backend.found", "false");
+        print_warn_row(color, "backend.found", "false");
     }
+}
+
+fn emit_doctor_config(
+    config: &EffectiveConfig,
+    report: &tapcue::notifier::NotificationDoctorReport,
+    paths: &tapcue::config::ConfigPathInfo,
+) {
     print_section("config");
 
-    if let Some(path) = paths.user_config_path {
+    if let Some(path) = &paths.user_config_path {
         print_neutral_row(
             "config.user",
             &format!(
@@ -903,18 +921,21 @@ fn emit_doctor(config: &EffectiveConfig, sources: &NotificationConfigSources) {
             if paths.local_config_exists { "found" } else { "missing" }
         ),
     );
-    let mut fixes = suggested_fixes(config, &report);
+
+    let mut fixes = suggested_fixes(config, report);
     if !fixes.is_empty() {
         print_section("fixes");
         for (index, fix) in fixes.drain(..).enumerate() {
             print_neutral_row(&format!("fix.{}", index + 1), &fix);
         }
     }
+}
 
+fn emit_doctor_reasons(color: &DoctorColor, report: &tapcue::notifier::NotificationDoctorReport) {
     if !report.reasons.is_empty() {
         print_section("reasons");
-        for reason in report.reasons {
-            print_fail_row(&color, "reason", &reason);
+        for reason in &report.reasons {
+            print_fail_row(color, "reason", reason);
         }
     }
 }

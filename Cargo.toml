@@ -2,7 +2,7 @@
 name = "tapcue"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.86"
 authors = ["Kunal K. Sarkhel <ksarkhel@gmu.edu>"]
 license = "Apache-2.0"
 description = "Stream TAP from stdin and emit desktop notifications for failures, bailouts, and run summary."

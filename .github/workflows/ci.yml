@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       rust_core: ${{ steps.filter.outputs.rust_core }}
+      release_relevant: ${{ steps.release_relevant.outputs.value }}
       integration_rust_nextest: ${{ steps.filter.outputs.integration_rust_nextest }}
       integration_go: ${{ steps.filter.outputs.integration_go }}
       integration_npm_tap: ${{ steps.filter.outputs.integration_npm_tap }}
@@ -36,7 +37,7 @@ jobs:
 
       - name: Detect changed paths
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             rust_core:
@@ -95,9 +96,40 @@ jobs:
               - 'tests/**'
               - '.github/workflows/**'
 
+      - name: Determine release-relevant changes
+        id: release_relevant
+        env:
+          INTEGRATION_RUST_NEXTEST: ${{ steps.filter.outputs.integration_rust_nextest }}
+          INTEGRATION_GO: ${{ steps.filter.outputs.integration_go }}
+          INTEGRATION_NPM_TAP: ${{ steps.filter.outputs.integration_npm_tap }}
+          INTEGRATION_BUN: ${{ steps.filter.outputs.integration_bun }}
+          INTEGRATION_JEST_JSON: ${{ steps.filter.outputs.integration_jest_json }}
+          INTEGRATION_VITEST_JSON: ${{ steps.filter.outputs.integration_vitest_json }}
+          INTEGRATION_PYTHON_PYTEST: ${{ steps.filter.outputs.integration_python_pytest }}
+          INTEGRATION_PYTHON_UNITTEST: ${{ steps.filter.outputs.integration_python_unittest }}
+          INTEGRATION_JUNIT_RUN: ${{ steps.filter.outputs.integration_junit_run }}
+        run: |
+          value=false
+          for flag in \
+            "$INTEGRATION_RUST_NEXTEST" \
+            "$INTEGRATION_GO" \
+            "$INTEGRATION_NPM_TAP" \
+            "$INTEGRATION_BUN" \
+            "$INTEGRATION_JEST_JSON" \
+            "$INTEGRATION_VITEST_JSON" \
+            "$INTEGRATION_PYTHON_PYTEST" \
+            "$INTEGRATION_PYTHON_UNITTEST" \
+            "$INTEGRATION_JUNIT_RUN"; do
+            if [[ "$flag" == "true" ]]; then
+              value=true
+              break
+            fi
+          done
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
   build-tapcue-debug:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.integration_rust_nextest == 'true' || needs.changes.outputs.integration_go == 'true' || needs.changes.outputs.integration_npm_tap == 'true' || needs.changes.outputs.integration_bun == 'true' || needs.changes.outputs.integration_jest_json == 'true' || needs.changes.outputs.integration_vitest_json == 'true' || needs.changes.outputs.integration_python_pytest == 'true' || needs.changes.outputs.integration_python_unittest == 'true' || needs.changes.outputs.integration_junit_run == 'true'
+    if: github.event_name != 'pull_request' || needs.changes.outputs.release_relevant == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -159,7 +191,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - toolchain: 1.75.0
+          - toolchain: 1.86.0
             allow_failure: false
           - toolchain: stable
             allow_failure: false
@@ -645,9 +677,12 @@ jobs:
         run: |
           $binaryPath = "target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }}"
           & $binaryPath --help | Out-Null
-          "TAP version 14`n1..1`nok 1 - release-smoke`n" | & $binaryPath --no-notify --format tap | Out-Null
-          $jsonInput = "{""Action"":""pass"",""Package"":""pkg"",""Test"":""ok""}`n{""Action"":""fail"",""Package"":""pkg"",""Test"":""bad""}`n"
-          $jsonInput | & $binaryPath --no-notify --format json
+
+          Set-Content -Path smoke.tap -Value "TAP version 14`n1..1`nok 1 - release-smoke`n" -Encoding utf8
+          Get-Content -Path smoke.tap -Raw | & $binaryPath --no-notify --format tap | Out-Null
+
+          Set-Content -Path smoke.json -Value "{""Action"":""pass"",""Package"":""pkg"",""Test"":""ok""}`n{""Action"":""fail"",""Package"":""pkg"",""Test"":""bad""}`n" -Encoding utf8
+          Get-Content -Path smoke.json -Raw | & $binaryPath --no-notify --format json
           if ($LASTEXITCODE -ne 1) {
             throw "expected release smoke JSON failure exit code 1, got $LASTEXITCODE"
           }

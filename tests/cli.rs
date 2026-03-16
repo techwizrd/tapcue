@@ -1,10 +1,11 @@
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::time::Duration;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-use std::time::Duration;
 use tempfile::tempdir;
 
 fn fixture(name: &str) -> String {

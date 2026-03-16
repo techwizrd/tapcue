@@ -2,7 +2,7 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/techwizrd/tapcue/ci.yml?branch=main)](https://github.com/techwizrd/tapcue/actions/workflows/ci.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/techwizrd/tapcue?sort=semver)](https://github.com/techwizrd/tapcue/releases)
-[![MSRV](https://img.shields.io/badge/MSRV-1.75-blue?logo=rust)](https://github.com/techwizrd/tapcue/blob/main/Cargo.toml)
+[![MSRV](https://img.shields.io/badge/MSRV-1.86-blue?logo=rust)](https://github.com/techwizrd/tapcue/blob/main/Cargo.toml)
 [![License](https://img.shields.io/github/license/techwizrd/tapcue)](LICENSE)
 
 `tapcue` 🦀 reads TAP (Test Anything Protocol), JSON test output, Bun, and JUnit XML from test runners (recommended via `tapcue run -- ...`, or from `stdin`) and sends desktop notifications for:

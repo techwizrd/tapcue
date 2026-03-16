@@ -20,9 +20,24 @@ updates:
       day: monday
       time: "06:30"
       timezone: "UTC"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "ci"
     labels:
       - dependencies
       - ci
+    groups:
+      gha-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      gha-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
+
+# Intentionally omitted: npm/pip ecosystems under tests/runner-fixtures/**.
+# Those fixture dependency trees are test data and are excluded to reduce maintenance churn.

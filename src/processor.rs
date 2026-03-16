@@ -142,38 +142,11 @@ impl TapStreamProcessor {
     fn process_line(&mut self, line: &str, notifier: &mut dyn Notifier) {
         let trimmed = line.trim();
 
-        if self.capturing_subtest {
-            if let Some(nested) = line.strip_prefix("    ") {
-                self.subtest_lines.push(nested.to_owned());
-                return;
-            }
-
-            if self.subtest_lines.is_empty() && trimmed.is_empty() {
-                return;
-            }
-
-            if self.subtest_lines.is_empty() {
-                self.capturing_subtest = false;
-            } else {
-                self.finalize_subtest();
-            }
+        if self.consume_subtest_capture_line(line, trimmed) {
+            return;
         }
 
-        if self.in_yaml_block {
-            if line.starts_with("  ...") {
-                self.in_yaml_block = false;
-                return;
-            }
-
-            if line.starts_with("  ") {
-                return;
-            }
-
-            self.in_yaml_block = false;
-            self.parse_warning("invalid YAML diagnostic line", trimmed);
-            if self.strict_mode {
-                self.protocol_failure("invalid TAP line under strict mode");
-            }
+        if self.consume_yaml_block_line(line, trimmed) {
             return;
         }
 
@@ -212,24 +185,7 @@ impl TapStreamProcessor {
             self.yaml_can_start = false;
         }
 
-        if trimmed.starts_with('#') {
-            if self.pending_subtest_state.is_some() {
-                self.protocol_failure("subtest must be followed by parent test point");
-                self.pending_subtest_state = None;
-            }
-
-            if trimmed.starts_with("# Subtest:") {
-                self.capturing_subtest = true;
-                self.subtest_lines.clear();
-            }
-            return;
-        }
-
-        if line.starts_with(' ') || line.starts_with('\t') {
-            self.parse_warning("unexpected indented TAP line", trimmed);
-            if self.strict_mode {
-                self.protocol_failure("invalid TAP line under strict mode");
-            }
+        if self.consume_comment_or_indented_line(line, trimmed) {
             return;
         }
 
@@ -279,6 +235,78 @@ impl TapStreamProcessor {
         if self.strict_mode {
             self.protocol_failure("invalid TAP line under strict mode");
         }
+    }
+
+    fn consume_subtest_capture_line(&mut self, line: &str, trimmed: &str) -> bool {
+        if !self.capturing_subtest {
+            return false;
+        }
+
+        if let Some(nested) = line.strip_prefix("    ") {
+            self.subtest_lines.push(nested.to_owned());
+            return true;
+        }
+
+        if self.subtest_lines.is_empty() && trimmed.is_empty() {
+            return true;
+        }
+
+        if self.subtest_lines.is_empty() {
+            self.capturing_subtest = false;
+        } else {
+            self.finalize_subtest();
+        }
+
+        false
+    }
+
+    fn consume_yaml_block_line(&mut self, line: &str, trimmed: &str) -> bool {
+        if !self.in_yaml_block {
+            return false;
+        }
+
+        if line.starts_with("  ...") {
+            self.in_yaml_block = false;
+            return true;
+        }
+
+        if line.starts_with("  ") {
+            return true;
+        }
+
+        self.in_yaml_block = false;
+        self.parse_warning("invalid YAML diagnostic line", trimmed);
+        if self.strict_mode {
+            self.protocol_failure("invalid TAP line under strict mode");
+        }
+
+        true
+    }
+
+    fn consume_comment_or_indented_line(&mut self, line: &str, trimmed: &str) -> bool {
+        if trimmed.starts_with('#') {
+            if self.pending_subtest_state.is_some() {
+                self.protocol_failure("subtest must be followed by parent test point");
+                self.pending_subtest_state = None;
+            }
+
+            if trimmed.starts_with("# Subtest:") {
+                self.capturing_subtest = true;
+                self.subtest_lines.clear();
+            }
+
+            return true;
+        }
+
+        if line.starts_with(' ') || line.starts_with('\t') {
+            self.parse_warning("unexpected indented TAP line", trimmed);
+            if self.strict_mode {
+                self.protocol_failure("invalid TAP line under strict mode");
+            }
+            return true;
+        }
+
+        false
     }
 
     fn apply_plan(&mut self, plan: ParsedPlan) {
@@ -516,6 +544,10 @@ fn parse_test_point(line: &str) -> Option<ParsedTestPoint<'_>> {
 }
 
 fn split_directive(body: &str) -> (&str, Option<&str>) {
+    if !body.as_bytes().contains(&b'#') {
+        return (body, None);
+    }
+
     let bytes = body.as_bytes();
     let mut escaped = false;
 

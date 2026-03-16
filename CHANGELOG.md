@@ -23,7 +23,7 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 - Desktop diagnostics command is now `tapcue doctor` (subcommand form).
 - macOS notifications now prefer `terminal-notifier` when available, with `osascript` fallback.
 - CI now publishes a single rolling prerelease tag (`unreleased`) on untagged `main` pushes.
-- CI now runs Rust checks on Linux/macOS/Windows and adds Linux toolchain coverage for 1.75.0, stable, and nightly (nightly allowed to fail).
+- CI now runs Rust checks on Linux/macOS/Windows and adds Linux toolchain coverage for 1.86.0, stable, and nightly (nightly allowed to fail).
 
 ### Fixed
 - CR-only TAP line endings now parse correctly (`\r` separators).

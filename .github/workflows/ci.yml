@@ -503,8 +503,8 @@ jobs:
           TAPCUE_BIN: ${{ github.workspace }}/bin/tapcue
         run: ./scripts/verify-junit-run-integration.sh
 
-  build-release:
-    if: github.event_name == 'push'
+  build-release-prerelease:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs:
@@ -533,14 +533,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
 
       - name: Release smoke test
         run: |
-          target/release/tapcue --help >/dev/null
-          printf 'TAP version 14\n1..1\nok 1 - release-smoke\n' | target/release/tapcue --no-notify --format tap
+          target/x86_64-unknown-linux-gnu/release/tapcue --help >/dev/null
+          printf 'TAP version 14\n1..1\nok 1 - release-smoke\n' | target/x86_64-unknown-linux-gnu/release/tapcue --no-notify --format tap
           set +e
-          printf '{"Action":"pass","Package":"pkg","Test":"ok"}\n{"Action":"fail","Package":"pkg","Test":"bad"}\n' | target/release/tapcue --no-notify --format json
+          printf '{"Action":"pass","Package":"pkg","Test":"ok"}\n{"Action":"fail","Package":"pkg","Test":"bad"}\n' | target/x86_64-unknown-linux-gnu/release/tapcue --no-notify --format json
           status=$?
           set -e
           if [[ $status -ne 1 ]]; then
@@ -551,20 +551,19 @@ jobs:
       - name: Package release artifact
         id: package
         run: |
-          mkdir -p dist
-          cp target/release/tapcue dist/tapcue
-          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            artifact_name="tapcue-${{ runner.os }}-unreleased.tar.gz"
-          else
-            artifact_name="tapcue-${{ runner.os }}-${GITHUB_REF_NAME}.tar.gz"
-          fi
-          tar -C dist -czf "dist/${artifact_name}" tapcue
+          mkdir -p dist/package/bin
+          mkdir -p dist/package/share/man/man1
+          mkdir -p dist/package/share/tldr-pages/pages/common
+          cp target/x86_64-unknown-linux-gnu/release/tapcue dist/package/bin/tapcue
+          cp docs/man/tapcue.1 dist/package/share/man/man1/tapcue.1
+          cp docs/tldr/tapcue.md dist/package/share/tldr-pages/pages/common/tapcue.md
+          artifact_name="tapcue-unreleased-x86_64-unknown-linux-gnu.tar.gz"
+          tar -C dist/package -czf "dist/${artifact_name}" .
           sha256sum "dist/${artifact_name}" > "dist/${artifact_name}.sha256"
           echo "artifact_path=dist/${artifact_name}" >> "$GITHUB_OUTPUT"
           echo "artifact_sha_path=dist/${artifact_name}.sha256" >> "$GITHUB_OUTPUT"
 
       - name: Publish prerelease from main
-        if: startsWith(github.ref, 'refs/heads/main')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: unreleased
@@ -576,13 +575,159 @@ jobs:
             ${{ steps.package.outputs.artifact_path }}
             ${{ steps.package.outputs.artifact_sha_path }}
 
+  build-release-tag-artifacts:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            binary_name: tapcue
+            archive_ext: tar.gz
+          - os: macos-14
+            rust_target: aarch64-apple-darwin
+            binary_name: tapcue
+            archive_ext: tar.gz
+          - os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            binary_name: tapcue.exe
+            archive_ext: zip
+    needs:
+      - rust-matrix
+      - rust-toolchain-linux
+      - test-linux-extra
+      - integration-rust-nextest
+      - integration-go
+      - integration-npm-tap
+      - integration-bun
+      - integration-jest-json
+      - integration-vitest-json
+      - integration-python-pytest
+      - integration-python-unittest
+      - integration-junit-run
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.rust_target }}
+
+      - name: Release smoke test (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          binary_path="target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }}"
+          "$binary_path" --help >/dev/null
+          printf 'TAP version 14\n1..1\nok 1 - release-smoke\n' | "$binary_path" --no-notify --format tap
+          set +e
+          printf '{"Action":"pass","Package":"pkg","Test":"ok"}\n{"Action":"fail","Package":"pkg","Test":"bad"}\n' | "$binary_path" --no-notify --format json
+          status=$?
+          set -e
+          if [[ $status -ne 1 ]]; then
+            echo "expected release smoke JSON failure exit code 1, got $status"
+            exit 1
+          fi
+
+      - name: Release smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $binaryPath = "target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }}"
+          & $binaryPath --help | Out-Null
+          "TAP version 14`n1..1`nok 1 - release-smoke`n" | & $binaryPath --no-notify --format tap | Out-Null
+          $jsonInput = "{""Action"":""pass"",""Package"":""pkg"",""Test"":""ok""}`n{""Action"":""fail"",""Package"":""pkg"",""Test"":""bad""}`n"
+          $jsonInput | & $binaryPath --no-notify --format json
+          if ($LASTEXITCODE -ne 1) {
+            throw "expected release smoke JSON failure exit code 1, got $LASTEXITCODE"
+          }
+
+      - name: Package release artifact (Unix)
+        if: runner.os != 'Windows'
+        id: package_unix
+        run: |
+          mkdir -p dist/package/bin
+          mkdir -p dist/package/share/man/man1
+          mkdir -p dist/package/share/tldr-pages/pages/common
+          cp "target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }}" dist/package/bin/${{ matrix.binary_name }}
+          cp docs/man/tapcue.1 dist/package/share/man/man1/tapcue.1
+          cp docs/tldr/tapcue.md dist/package/share/tldr-pages/pages/common/tapcue.md
+          artifact_name="tapcue-${GITHUB_REF_NAME}-${{ matrix.rust_target }}.${{ matrix.archive_ext }}"
+          tar -C dist/package -czf "dist/${artifact_name}" .
+          echo "artifact_name=${artifact_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Package release artifact (Windows)
+        if: runner.os == 'Windows'
+        id: package_windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "dist/package/bin" | Out-Null
+          New-Item -ItemType Directory -Force -Path "dist/package/share/man/man1" | Out-Null
+          New-Item -ItemType Directory -Force -Path "dist/package/share/tldr-pages/pages/common" | Out-Null
+          Copy-Item "target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }}" "dist/package/bin/${{ matrix.binary_name }}"
+          Copy-Item "docs/man/tapcue.1" "dist/package/share/man/man1/tapcue.1"
+          Copy-Item "docs/tldr/tapcue.md" "dist/package/share/tldr-pages/pages/common/tapcue.md"
+          $artifactName = "tapcue-$env:GITHUB_REF_NAME-${{ matrix.rust_target }}.${{ matrix.archive_ext }}"
+          Compress-Archive -Path "dist/package/*" -DestinationPath "dist/$artifactName" -Force
+          "artifact_name=$artifactName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload release artifact (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-archive-${{ matrix.rust_target }}
+          path: dist/${{ steps.package_unix.outputs.artifact_name }}
+
+      - name: Upload release artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-archive-${{ matrix.rust_target }}
+          path: dist/${{ steps.package_windows.outputs.artifact_name }}
+
+  publish-tagged-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - build-release-tag-artifacts
+    permissions:
+      contents: write
+    steps:
+      - name: Download platform release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-archive-*
+          merge-multiple: true
+          path: dist
+
+      - name: Generate checksums
+        run: |
+          shopt -s nullglob
+          files=(dist/*)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No release artifacts were downloaded."
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            sha256sum "$file" > "$file.sha256"
+          done
+
       - name: Publish tagged release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           prerelease: false
           files: |
-            ${{ steps.package.outputs.artifact_path }}
-            ${{ steps.package.outputs.artifact_sha_path }}
+            dist/*

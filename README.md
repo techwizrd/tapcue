@@ -5,13 +5,11 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.75-blue?logo=rust)](https://github.com/techwizrd/tapcue/blob/main/Cargo.toml)
 [![License](https://img.shields.io/github/license/techwizrd/tapcue)](LICENSE)
 
-`tapcue` reads TAP (Test Anything Protocol) and JSON test output from test runners (recommended via `tapcue run -- ...`, or from `stdin`) and sends desktop notifications for:
+`tapcue` 🦀 reads TAP (Test Anything Protocol), JSON test output, Bun, and JUnit XML from test runners (recommended via `tapcue run -- ...`, or from `stdin`) and sends desktop notifications for:
 
 - failing tests
 - bailouts
 - final run summary
-
-It is designed for streaming TAP input and incremental parsing. 🦀
 
 Common runner inputs include:
 
@@ -50,6 +48,26 @@ vitest run --reporter=json | tapcue
 pytest --tap-stream | tapcue
 ```
 
+## Quickstart
+
+Install from GitHub with Cargo:
+
+```bash
+cargo install --git https://github.com/techwizrd/tapcue tapcue
+```
+
+Then run it with your test command:
+
+```bash
+tapcue run -- pytest
+```
+
+Install with Homebrew (without a separate `brew tap` step):
+
+```bash
+brew install techwizrd/tap/tapcue
+```
+
 ## Install / Build
 
 ```bash
@@ -58,17 +76,17 @@ cargo build --release
 
 The resulting binary is at `target/release/tapcue`.
 
-Install directly from GitHub `main`:
+Install directly from GitHub:
 
 ```bash
-cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue
+cargo install --git https://github.com/techwizrd/tapcue tapcue
 ```
 
 Optional pin/reinstall variants:
 
 ```bash
 cargo install --git https://github.com/techwizrd/tapcue --rev <commit-sha> tapcue
-cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue --force
+cargo install --git https://github.com/techwizrd/tapcue tapcue --force
 ```
 
 ## CLI options and subcommands

@@ -29,6 +29,7 @@ jobs:
       integration_vitest_json: ${{ steps.filter.outputs.integration_vitest_json }}
       integration_python_pytest: ${{ steps.filter.outputs.integration_python_pytest }}
       integration_python_unittest: ${{ steps.filter.outputs.integration_python_unittest }}
+      integration_junit_run: ${{ steps.filter.outputs.integration_junit_run }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -88,10 +89,15 @@ jobs:
               - 'scripts/verify-unittest-integration.sh'
               - 'tests/runner-fixtures/python-unittest/**'
               - '.github/workflows/**'
+            integration_junit_run:
+              - 'src/**'
+              - 'scripts/verify-junit-run-integration.sh'
+              - 'tests/**'
+              - '.github/workflows/**'
 
   build-tapcue-debug:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.integration_rust_nextest == 'true' || needs.changes.outputs.integration_go == 'true' || needs.changes.outputs.integration_npm_tap == 'true' || needs.changes.outputs.integration_bun == 'true' || needs.changes.outputs.integration_jest_json == 'true' || needs.changes.outputs.integration_vitest_json == 'true' || needs.changes.outputs.integration_python_pytest == 'true' || needs.changes.outputs.integration_python_unittest == 'true'
+    if: github.event_name != 'pull_request' || needs.changes.outputs.integration_rust_nextest == 'true' || needs.changes.outputs.integration_go == 'true' || needs.changes.outputs.integration_npm_tap == 'true' || needs.changes.outputs.integration_bun == 'true' || needs.changes.outputs.integration_jest_json == 'true' || needs.changes.outputs.integration_vitest_json == 'true' || needs.changes.outputs.integration_python_pytest == 'true' || needs.changes.outputs.integration_python_unittest == 'true' || needs.changes.outputs.integration_junit_run == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -474,6 +480,29 @@ jobs:
           TAPCUE_BIN: ${{ github.workspace }}/bin/tapcue
         run: ./scripts/verify-unittest-integration.sh
 
+  integration-junit-run:
+    needs: [changes, build-tapcue-debug]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.integration_junit_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download tapcue debug binary
+        uses: actions/download-artifact@v8
+        with:
+          name: tapcue-debug-bin
+          path: bin
+
+      - name: Ensure tapcue binary is executable
+        run: chmod +x bin/tapcue
+
+      - name: Verify JUnit run integration
+        env:
+          TAPCUE_BIN: ${{ github.workspace }}/bin/tapcue
+        run: ./scripts/verify-junit-run-integration.sh
+
   build-release:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -490,6 +519,7 @@ jobs:
       - integration-vitest-json
       - integration-python-pytest
       - integration-python-unittest
+      - integration-junit-run
     permissions:
       contents: write
     steps:

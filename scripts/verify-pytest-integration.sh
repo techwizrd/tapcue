@@ -27,7 +27,7 @@ UV_LINK_MODE=copy uv venv --quiet --python python3 "$tmp_dir/venv"
 UV_LINK_MODE=copy uv pip install --quiet --python "$tmp_dir/venv/bin/python" --require-hashes -r "$FIXTURE_DIR/requirements.lock"
 
 set +e
-PYTHONDONTWRITEBYTECODE=1 "$tmp_dir/venv/bin/python" -m pytest --tap-stream "$FIXTURE_DIR" >"$tmp_file"
+PYTHONDONTWRITEBYTECODE=1 "$tmp_dir/venv/bin/python" -m pytest "$FIXTURE_DIR" >"$tmp_file"
 runner_status=$?
 set -e
 
@@ -36,18 +36,13 @@ if [[ $runner_status -eq 0 ]]; then
   exit 1
 fi
 
-if ! grep -Eq '^not ok ' "$tmp_file"; then
-  echo "Expected TAP failure lines in pytest output."
-  exit 1
-fi
-
-if ! grep -Eq '^1\.\.[0-9]+' "$tmp_file"; then
-  echo "Expected TAP plan line in pytest output."
+if ! grep -Eqi 'fail|failed' "$tmp_file"; then
+  echo "Expected failure markers in pytest output."
   exit 1
 fi
 
 set +e
-"$TAPCUE_BIN" --format tap --no-notify <"$tmp_file"
+PYTHONDONTWRITEBYTECODE=1 "$TAPCUE_BIN" --format auto --no-notify --run-output off run -- "$tmp_dir/venv/bin/python" -m pytest "$FIXTURE_DIR"
 tapcue_status=$?
 set -e
 

@@ -37,7 +37,7 @@ if ! grep -q '"type":"test"' "$tmp_file"; then
 fi
 
 set +e
-"$TAPCUE_BIN" --format json --no-notify <"$tmp_file"
+"$TAPCUE_BIN" --format json --no-notify --run-output off run -- cargo nextest run --manifest-path "$ROOT_DIR/tests/runner-fixtures/rust-nextest/Cargo.toml"
 tapcue_status=$?
 set -e
 

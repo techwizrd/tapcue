@@ -3,25 +3,29 @@
 > Stream TAP or JSON test output and emit desktop notifications.
 > More information: <https://github.com/techwizrd/tapcue>.
 
-- Process `npm test` TAP output:
+- Run `npm test` TAP output through `tapcue`:
 
-`npm test --silent | tapcue`
+`tapcue run -- npm test --silent`
 
-- Process default Bun test output:
+- Run default Bun test output through `tapcue`:
 
-`bun test | tapcue`
+`tapcue run -- bun test`
 
-- Process `go test` JSON output:
+- Run `go test` JSON output through `tapcue`:
 
-`go test ./... -json | tapcue`
+`tapcue run -- go test ./...`
 
-- Process `cargo nextest` JSON output:
+- Run `cargo nextest` JSON output through `tapcue`:
 
-`env NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --message-format libtest-json-plus | tapcue`
+`tapcue run -- cargo nextest run`
+
+- Run `pytest` with auto-inferred JUnit output:
+
+`tapcue run -- pytest`
 
 - CI mode: disable desktop notifications and write summary JSON:
 
-`go test ./... -json | tapcue --no-notify --summary-format json --summary-file run-summary.json`
+`tapcue --no-notify --summary-format json --summary-file run-summary.json run -- go test ./...`
 
 - Validate merged config and exit:
 

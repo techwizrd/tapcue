@@ -47,7 +47,7 @@ if ! grep -Eq '^1\.\.[0-9]+' "$tmp_file"; then
 fi
 
 set +e
-"$TAPCUE_BIN" --format tap --no-notify <"$tmp_file"
+PYTHONDONTWRITEBYTECODE=1 "$TAPCUE_BIN" --format tap --no-notify --run-output off run -- "$tmp_dir/venv/bin/python" "$FIXTURE_DIR/run_tap.py"
 tapcue_status=$?
 set -e
 

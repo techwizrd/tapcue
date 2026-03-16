@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{bail, Result};
 use clap::Parser;
@@ -76,37 +76,54 @@ fn main() -> Result<()> {
         trace_detection: effective_config.trace_detection,
     };
 
-    let inferred_runner_for_run = match &cli.command {
+    let resolved_run_command = match &cli.command {
         Some(CliCommand::Run(run_cli)) => {
-            if effective_config.auto_junit_reports
-                && effective_config.junit_file.is_empty()
-                && effective_config.junit_dir.is_empty()
-                && effective_config.junit_glob.is_empty()
-            {
-                infer_junit_globs_for_command(run_cli).0
-            } else {
-                None
-            }
+            Some(resolve_run_command(run_cli, &effective_config, SystemTime::now())?)
         }
         _ => None,
+    };
+
+    let inferred_runner_for_run = if effective_config.auto_junit_reports
+        && effective_config.junit_file.is_empty()
+        && effective_config.junit_dir.is_empty()
+        && effective_config.junit_glob.is_empty()
+    {
+        resolved_run_command.as_ref().and_then(|resolved| resolved.inferred_runner).or_else(|| {
+            resolved_run_command
+                .as_ref()
+                .and_then(|resolved| infer_junit_globs_for_command(&resolved.command).0)
+        })
+    } else {
+        None
     };
 
     let skip_stream_parse_for_inferred_junit = inferred_runner_for_run.is_some()
         && !effective_config.junit_only
         && matches!(effective_config.input_format, InputFormat::Auto);
 
-    let (mut state, child_status, run_started_at) = match &cli.command {
-        Some(CliCommand::Run(run_cli)) => {
-            let started_at = SystemTime::now();
-            let (state, status) = if effective_config.junit_only
-                || skip_stream_parse_for_inferred_junit
-            {
-                let status = run_and_wait(run_cli)?;
-                (empty_state(), status)
-            } else {
-                run_and_process(run_cli, &mut notifier, app_config, effective_config.run_output)?
-            };
-            (state, Some(status), Some(started_at))
+    let (mut state, child_status, run_started_at, summary_notified_by_stream) = match &cli.command {
+        Some(CliCommand::Run(_run_cli)) => {
+            let started_at = resolved_run_command
+                .as_ref()
+                .map(|resolved| resolved.started_at)
+                .unwrap_or_else(SystemTime::now);
+            let resolved = resolved_run_command
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("tapcue: missing resolved run command"))?;
+            let (state, status, summary_notified_by_stream) =
+                if effective_config.junit_only || skip_stream_parse_for_inferred_junit {
+                    let status = run_and_wait(resolved)?;
+                    (empty_state(), status, false)
+                } else {
+                    let (state, status) = run_and_process(
+                        resolved,
+                        &mut notifier,
+                        app_config,
+                        effective_config.run_output,
+                    )?;
+                    (state, status, true)
+                };
+            (state, Some(status), Some(started_at), summary_notified_by_stream)
         }
         _ => {
             let state = if effective_config.junit_only {
@@ -114,22 +131,26 @@ fn main() -> Result<()> {
             } else {
                 process_stream(io::stdin().lock(), &mut notifier, app_config)?
             };
-            (state, None, None)
+            (state, None, None, !effective_config.junit_only)
         }
     };
 
-    let run_command = match &cli.command {
-        Some(CliCommand::Run(run_cli)) => Some(run_cli),
-        _ => None,
-    };
+    let run_command = resolved_run_command.as_ref().map(|resolved| resolved.command.as_slice());
 
     let junit_reports = resolve_junit_report_files(
         &effective_config,
         run_command,
+        resolved_run_command
+            .as_ref()
+            .map(|resolved| resolved.inferred_junit_files.as_slice())
+            .unwrap_or(&[]),
         run_started_at,
         effective_config.trace_detection,
     )?;
-    if effective_config.junit_only && junit_reports.files.is_empty() {
+    if effective_config.junit_only
+        && junit_reports.files.is_empty()
+        && !junit_reports.matched_existing_but_unmodified
+    {
         bail!("tapcue: --junit-only requires at least one JUnit report input");
     }
     let junit_state = ingest_junit_reports(
@@ -145,10 +166,13 @@ fn main() -> Result<()> {
 
     merge_run_state(&mut state, &junit_state);
 
-    let suppress_summary = junit_reports.inferred_runner.is_some()
+    let suppress_summary = !summary_notified_by_stream
         && junit_reports.matched_existing_but_unmodified
         && junit_state.total == 0;
     if !suppress_summary {
+        if !summary_notified_by_stream {
+            notifier.notify_summary(&state);
+        }
         emit_summary(&effective_config, &state)?;
     }
 
@@ -169,15 +193,192 @@ fn main() -> Result<()> {
     }
 }
 
-fn run_and_wait(run_cli: &RunCli) -> Result<std::process::ExitStatus> {
-    let program = run_cli
+#[derive(Clone, Debug)]
+struct ResolvedRunCommand {
+    command: Vec<String>,
+    env_overrides: Vec<(String, String)>,
+    inferred_junit_files: Vec<PathBuf>,
+    inferred_runner: Option<InferredJunitRunner>,
+    started_at: SystemTime,
+}
+
+fn resolve_run_command(
+    run_cli: &RunCli,
+    config: &EffectiveConfig,
+    started_at: SystemTime,
+) -> Result<ResolvedRunCommand> {
+    let mut resolved = ResolvedRunCommand {
+        command: run_cli.command.clone(),
+        env_overrides: Vec::new(),
+        inferred_junit_files: Vec::new(),
+        inferred_runner: None,
+        started_at,
+    };
+
+    if !config.auto_runner_adapt {
+        return Ok(resolved);
+    }
+
+    let Some(program) = resolved.command.first() else {
+        bail!("tapcue: run command is required");
+    };
+
+    let executable = Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+
+    if executable == "go"
+        && resolved.command.get(1).is_some_and(|arg| arg == "test")
+        && !resolved.command.iter().any(|arg| arg == "-json" || arg == "--json")
+    {
+        resolved.command.insert(2, "-json".to_owned());
+        return Ok(resolved);
+    }
+
+    if executable == "cargo"
+        && resolved.command.get(1).is_some_and(|arg| arg == "nextest")
+        && resolved.command.get(2).is_some_and(|arg| arg == "run")
+    {
+        if !resolved
+            .command
+            .iter()
+            .any(|arg| arg == "--message-format" || arg.starts_with("--message-format="))
+        {
+            insert_before_runner_passthrough(
+                &mut resolved.command,
+                vec!["--message-format".to_owned(), "libtest-json-plus".to_owned()],
+            );
+        }
+
+        if std::env::var_os("NEXTEST_EXPERIMENTAL_LIBTEST_JSON").is_none() {
+            resolved
+                .env_overrides
+                .push(("NEXTEST_EXPERIMENTAL_LIBTEST_JSON".to_owned(), "1".to_owned()));
+        }
+
+        return Ok(resolved);
+    }
+
+    if executable == "jest" {
+        if !resolved.command.iter().any(|arg| arg == "--json") {
+            insert_before_runner_passthrough(&mut resolved.command, vec!["--json".to_owned()]);
+        }
+
+        if !resolved
+            .command
+            .iter()
+            .any(|arg| arg == "--outputFile" || arg.starts_with("--outputFile="))
+        {
+            insert_before_runner_passthrough(
+                &mut resolved.command,
+                vec!["--outputFile".to_owned(), "/dev/stdout".to_owned()],
+            );
+        }
+
+        return Ok(resolved);
+    }
+
+    if executable == "vitest" {
+        if !resolved.command.iter().any(|arg| arg == "--reporter" || arg.starts_with("--reporter="))
+        {
+            insert_before_runner_passthrough(
+                &mut resolved.command,
+                vec!["--reporter=json".to_owned()],
+            );
+        }
+
+        return Ok(resolved);
+    }
+
+    if let Some(pytest_insert_at) = pytest_argument_insert_index(&resolved.command) {
+        let has_junitxml = resolved
+            .command
+            .iter()
+            .any(|arg| arg == "--junitxml" || arg.starts_with("--junitxml="));
+        if !has_junitxml {
+            let report = generated_pytest_report_path(started_at);
+            resolved.command.splice(
+                pytest_insert_at..pytest_insert_at,
+                ["--junitxml".to_owned(), report.to_string_lossy().to_string()],
+            );
+            resolved.inferred_junit_files.push(report);
+            resolved.inferred_runner = Some(InferredJunitRunner::Pytest);
+            return Ok(resolved);
+        }
+    }
+
+    Ok(resolved)
+}
+
+fn insert_before_runner_passthrough(command: &mut Vec<String>, injected_args: Vec<String>) {
+    let insert_at = command.iter().position(|arg| arg == "--").unwrap_or(command.len());
+    command.splice(insert_at..insert_at, injected_args);
+}
+
+fn generated_pytest_report_path(started_at: SystemTime) -> PathBuf {
+    let nanos = started_at
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!("tapcue-pytest-{nanos}-{}.xml", std::process::id()))
+}
+
+fn pytest_argument_insert_index(command: &[String]) -> Option<usize> {
+    let Some(program) = command.first() else {
+        return None;
+    };
+
+    let executable = Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+
+    if executable == "pytest" {
+        return Some(1);
+    }
+
+    if executable == "python" || executable.starts_with("python3") {
+        for (index, window) in command.windows(2).enumerate() {
+            if window[0] == "-m" && window[1] == "pytest" {
+                return Some(index + 2);
+            }
+        }
+        return None;
+    }
+
+    if (executable == "uv" || executable == "poetry")
+        && command.get(1).is_some_and(|arg| arg == "run")
+    {
+        let mut index = 2;
+        if command.get(index).is_some_and(|arg| arg == "--") {
+            index += 1;
+        }
+
+        if command.get(index).is_some_and(|arg| arg == "pytest") {
+            return Some(index + 1);
+        }
+    }
+
+    None
+}
+
+fn run_and_wait(run_command: &ResolvedRunCommand) -> Result<std::process::ExitStatus> {
+    let program = run_command
         .command
         .first()
         .ok_or_else(|| anyhow::anyhow!("tapcue: run command is required"))?;
-    let args = &run_cli.command[1..];
+    let args = &run_command.command[1..];
 
-    let status = Command::new(program)
-        .args(args)
+    let mut command = Command::new(program);
+    command.args(args);
+    for (key, value) in &run_command.env_overrides {
+        command.env(key, value);
+    }
+
+    let status = command
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -187,23 +388,25 @@ fn run_and_wait(run_cli: &RunCli) -> Result<std::process::ExitStatus> {
 }
 
 fn run_and_process(
-    run_cli: &RunCli,
+    run_command: &ResolvedRunCommand,
     notifier: &mut dyn Notifier,
     app_config: AppConfig,
     run_output: RunOutputMode,
 ) -> Result<(RunState, std::process::ExitStatus)> {
-    let program = run_cli
+    let program = run_command
         .command
         .first()
         .ok_or_else(|| anyhow::anyhow!("tapcue: run command is required"))?;
-    let args = &run_cli.command[1..];
+    let args = &run_command.command[1..];
 
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let mut command = Command::new(program);
+    command.args(args);
+    for (key, value) in &run_command.env_overrides {
+        command.env(key, value);
+    }
+
+    let mut child =
+        command.stdin(Stdio::inherit()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
 
     let stdout = child
         .stdout
@@ -314,11 +517,14 @@ struct StreamChunk {
 
 fn resolve_junit_report_files(
     config: &EffectiveConfig,
-    run_command: Option<&RunCli>,
+    run_command: Option<&[String]>,
+    inferred_junit_files: &[PathBuf],
     run_started_at: Option<SystemTime>,
     trace_detection: bool,
 ) -> Result<JunitReportResolution> {
     let mut files = Vec::new();
+
+    files.extend_from_slice(inferred_junit_files);
 
     for file in &config.junit_file {
         files.push(file.clone());
@@ -354,6 +560,10 @@ fn resolve_junit_report_files(
         }
     }
 
+    let has_explicit_inputs = !config.junit_file.is_empty()
+        || !config.junit_dir.is_empty()
+        || !config.junit_glob.is_empty();
+
     let mut inferred_runner = None;
     if files.is_empty() && config.auto_junit_reports {
         if let Some(run_cli) = run_command {
@@ -374,22 +584,21 @@ fn resolve_junit_report_files(
     }
 
     let mut matched_existing_but_unmodified = false;
-    if inferred_runner.is_some() {
-        if let Some(started_at) = run_started_at {
+    if let Some(started_at) = run_started_at {
+        let apply_freshness_filter = inferred_runner.is_some() || has_explicit_inputs;
+        if apply_freshness_filter {
             let pre_filter_count = files.len();
             files.retain(|path| {
                 fs::metadata(path)
                     .and_then(|metadata| metadata.modified())
-                    .map(|modified| modified >= started_at)
+                    .map(|modified| is_fresh_report(modified, started_at))
                     .unwrap_or(false)
             });
 
             if files.is_empty() && pre_filter_count > 0 {
                 matched_existing_but_unmodified = true;
                 if trace_detection {
-                    eprintln!(
-                        "tapcue: inferred JUnit reports exist but none were modified in this run"
-                    );
+                    eprintln!("tapcue: JUnit reports exist but none were modified in this run");
                 }
             }
         }
@@ -400,8 +609,16 @@ fn resolve_junit_report_files(
     Ok(JunitReportResolution { files, inferred_runner, matched_existing_but_unmodified })
 }
 
-fn infer_junit_globs_for_command(run_cli: &RunCli) -> (Option<InferredJunitRunner>, Vec<String>) {
-    let Some(program) = run_cli.command.first() else {
+fn is_fresh_report(modified: SystemTime, started_at: SystemTime) -> bool {
+    const MTIME_TOLERANCE: Duration = Duration::from_secs(2);
+    match started_at.checked_sub(MTIME_TOLERANCE) {
+        Some(threshold) => modified >= threshold,
+        None => true,
+    }
+}
+
+fn infer_junit_globs_for_command(command: &[String]) -> (Option<InferredJunitRunner>, Vec<String>) {
+    let Some(program) = command.first() else {
         return (None, Vec::new());
     };
 
@@ -449,10 +666,11 @@ struct JunitReportResolution {
     matched_existing_but_unmodified: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum InferredJunitRunner {
     Gradle,
     Maven,
+    Pytest,
 }
 
 fn ingest_junit_reports(
@@ -861,10 +1079,15 @@ fn summary_destination(path: Option<&Path>) -> SummaryDestination<'_> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::time::{Duration, SystemTime};
 
     use tempfile::tempdir;
 
-    use super::{emit_summary, render_json_summary, render_text_summary, summary_destination};
+    use super::{
+        emit_summary, is_fresh_report, render_json_summary, render_text_summary,
+        resolve_run_command, summary_destination,
+    };
+    use tapcue::cli::RunCli;
     use tapcue::config::{DesktopMode, EffectiveConfig, InputFormat, RunOutputMode, SummaryFormat};
     use tapcue::processor::RunState;
 
@@ -892,6 +1115,7 @@ mod tests {
             summary_format: SummaryFormat::None,
             summary_file: None,
             run_output: RunOutputMode::Split,
+            auto_runner_adapt: true,
             junit_file: Vec::new(),
             junit_dir: Vec::new(),
             junit_glob: Vec::new(),
@@ -935,5 +1159,86 @@ mod tests {
         emit_summary(&cfg, &sample_state()).expect("emit summary should succeed");
         let content = fs::read_to_string(path).expect("summary file should exist");
         assert!(content.contains("status=failure"));
+    }
+
+    #[test]
+    fn fresh_report_tolerates_small_mtime_skew() {
+        let started = SystemTime::now();
+        let modified = started - Duration::from_secs(1);
+        assert!(is_fresh_report(modified, started));
+
+        let old_modified = started - Duration::from_secs(5);
+        assert!(!is_fresh_report(old_modified, started));
+    }
+
+    #[test]
+    fn run_auto_adapts_go_test_to_json() {
+        let cfg = sample_config();
+        let run_cli =
+            RunCli { command: vec!["go".to_owned(), "test".to_owned(), "./...".to_owned()] };
+        let resolved =
+            resolve_run_command(&run_cli, &cfg, SystemTime::now()).expect("command should resolve");
+
+        assert_eq!(resolved.command, vec!["go", "test", "-json", "./..."]);
+    }
+
+    #[test]
+    fn run_auto_adapts_pytest_to_junit_report() {
+        let cfg = sample_config();
+        let run_cli = RunCli { command: vec!["pytest".to_owned()] };
+        let resolved =
+            resolve_run_command(&run_cli, &cfg, SystemTime::now()).expect("command should resolve");
+
+        assert!(resolved.command.iter().any(|arg| arg == "--junitxml"));
+        assert_eq!(resolved.inferred_junit_files.len(), 1);
+    }
+
+    #[test]
+    fn run_auto_adapt_can_be_disabled() {
+        let mut cfg = sample_config();
+        cfg.auto_runner_adapt = false;
+        let run_cli =
+            RunCli { command: vec!["go".to_owned(), "test".to_owned(), "./...".to_owned()] };
+        let resolved =
+            resolve_run_command(&run_cli, &cfg, SystemTime::now()).expect("command should resolve");
+
+        assert_eq!(resolved.command, vec!["go", "test", "./..."]);
+    }
+
+    #[test]
+    fn run_auto_adapts_uv_run_pytest_to_junit_report() {
+        let cfg = sample_config();
+        let run_cli =
+            RunCli { command: vec!["uv".to_owned(), "run".to_owned(), "pytest".to_owned()] };
+        let resolved =
+            resolve_run_command(&run_cli, &cfg, SystemTime::now()).expect("command should resolve");
+
+        assert_eq!(resolved.command[0], "uv");
+        assert_eq!(resolved.command[1], "run");
+        assert_eq!(resolved.command[2], "pytest");
+        assert_eq!(resolved.command[3], "--junitxml");
+        assert_eq!(resolved.inferred_junit_files.len(), 1);
+    }
+
+    #[test]
+    fn run_auto_adapts_poetry_run_dash_dash_pytest_to_junit_report() {
+        let cfg = sample_config();
+        let run_cli = RunCli {
+            command: vec![
+                "poetry".to_owned(),
+                "run".to_owned(),
+                "--".to_owned(),
+                "pytest".to_owned(),
+            ],
+        };
+        let resolved =
+            resolve_run_command(&run_cli, &cfg, SystemTime::now()).expect("command should resolve");
+
+        assert_eq!(resolved.command[0], "poetry");
+        assert_eq!(resolved.command[1], "run");
+        assert_eq!(resolved.command[2], "--");
+        assert_eq!(resolved.command[3], "pytest");
+        assert_eq!(resolved.command[4], "--junitxml");
+        assert_eq!(resolved.inferred_junit_files.len(), 1);
     }
 }

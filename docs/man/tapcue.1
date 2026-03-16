@@ -45,6 +45,17 @@ Write summary output to a file, or use
 .B -
 for stdout.
 .TP
+.BI --run-output " split|merged|off"
+Runner output passthrough behavior for
+.B tapcue run -- ...
+.
+.TP
+.B --auto-runner-adapt
+Enable run-mode adaptation for known test runners.
+.TP
+.B --no-auto-runner-adapt
+Disable run-mode adaptation for known test runners.
+.TP
 .B --dedup-failures
 Deduplicate repeated failure notifications.
 .TP
@@ -107,6 +118,12 @@ Summary format: none, text, json.
 .B TAPCUE_SUMMARY_FILE
 Summary output destination path.
 .TP
+.B TAPCUE_RUN_OUTPUT
+Runner output passthrough mode: split, merged, off.
+.TP
+.B TAPCUE_AUTO_RUNNER_ADAPT
+Enable or disable run-mode runner adaptation (true/false).
+.TP
 .B TAPCUE_DEDUP_FAILURES
 Enable or disable deduplication (true/false).
 .TP
@@ -128,25 +145,25 @@ CLI flags > environment variables > local config > user config > defaults.
 .SH EXAMPLES
 .TP
 Default Bun test output:
-.B bun test | tapcue
+.B tapcue run -- bun test
 .TP
 Go JSON stream:
-.B go test ./... -json | tapcue
+.B tapcue run -- go test ./...
 .TP
 Nextest JSON stream:
-.B env NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --message-format libtest-json-plus | tapcue
+.B tapcue run -- cargo nextest run
 .TP
 Jest JSON stream:
-.B jest --json --outputFile /dev/stdout | tapcue
+.B tapcue run -- jest
 .TP
-pytest TAP stream:
-.B pytest --tap-stream | tapcue
+pytest with inferred JUnit output:
+.B tapcue run -- pytest
 .TP
 Emit JSON summary to a file:
-.B go test ./... -json | tapcue --summary-format json --summary-file run-summary.json
+.B tapcue --summary-format json --summary-file run-summary.json run -- go test ./...
 .TP
 CI mode (no desktop notifications + summary file):
-.B go test ./... -json | tapcue --no-notify --summary-format json --summary-file run-summary.json
+.B tapcue --no-notify --summary-format json --summary-file run-summary.json run -- go test ./...
 .TP
 Validate merged config:
 .B tapcue --validate-config

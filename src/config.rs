@@ -128,6 +128,7 @@ pub struct EffectiveConfig {
     pub summary_format: SummaryFormat,
     pub summary_file: Option<PathBuf>,
     pub run_output: RunOutputMode,
+    pub auto_runner_adapt: bool,
     pub junit_file: Vec<PathBuf>,
     pub junit_dir: Vec<PathBuf>,
     pub junit_glob: Vec<String>,
@@ -149,6 +150,7 @@ impl Default for EffectiveConfig {
             summary_format: SummaryFormat::None,
             summary_file: None,
             run_output: RunOutputMode::Split,
+            auto_runner_adapt: true,
             junit_file: Vec::new(),
             junit_dir: Vec::new(),
             junit_glob: Vec::new(),
@@ -214,6 +216,7 @@ struct JunitConfig {
 #[derive(Debug, Default, Deserialize)]
 struct RunConfig {
     output: Option<RunOutputMode>,
+    auto_runner_adapt: Option<bool>,
 }
 
 impl EffectiveConfig {
@@ -313,6 +316,10 @@ impl EffectiveConfig {
             self.run_output = value;
         }
 
+        if let Some(value) = file_config.run.auto_runner_adapt {
+            self.auto_runner_adapt = value;
+        }
+
         if let Some(value) = file_config.junit.file {
             self.junit_file = value;
         }
@@ -402,6 +409,10 @@ impl EffectiveConfig {
 
         if let Some(value) = read_env_run_output_mode("TAPCUE_RUN_OUTPUT") {
             self.run_output = value;
+        }
+
+        if let Some(value) = read_env_bool("TAPCUE_AUTO_RUNNER_ADAPT") {
+            self.auto_runner_adapt = value;
         }
 
         if let Some(value) = read_env_bool("TAPCUE_AUTO_JUNIT_REPORTS") {
@@ -498,6 +509,14 @@ impl EffectiveConfig {
             self.run_output = value.into();
         }
 
+        if cli.auto_runner_adapt {
+            self.auto_runner_adapt = true;
+        }
+
+        if cli.no_auto_runner_adapt {
+            self.auto_runner_adapt = false;
+        }
+
         if cli.auto_junit_reports {
             self.auto_junit_reports = true;
         }
@@ -540,7 +559,10 @@ impl EffectiveConfig {
                 summary_format: self.summary_format,
                 summary_file: self.summary_file.clone(),
             },
-            run: RenderedRunConfig { output: self.run_output },
+            run: RenderedRunConfig {
+                output: self.run_output,
+                auto_runner_adapt: self.auto_runner_adapt,
+            },
             junit: RenderedJunitConfig {
                 file: self.junit_file.clone(),
                 dir: self.junit_dir.clone(),
@@ -615,6 +637,7 @@ struct RenderedJunitConfig {
 #[derive(Serialize)]
 struct RenderedRunConfig {
     output: RunOutputMode,
+    auto_runner_adapt: bool,
 }
 
 fn user_config_path() -> Option<PathBuf> {
@@ -785,6 +808,7 @@ mod tests {
             summary_format: SummaryFormat::None,
             summary_file: None,
             run_output: RunOutputMode::Split,
+            auto_runner_adapt: true,
             junit_file: Vec::new(),
             junit_dir: Vec::new(),
             junit_glob: Vec::new(),
@@ -813,6 +837,8 @@ mod tests {
             run_output: None,
             auto_junit_reports: false,
             no_auto_junit_reports: false,
+            auto_runner_adapt: false,
+            no_auto_runner_adapt: false,
             dedup_failures: false,
             no_dedup_failures: true,
             max_failure_notifications: Some(4),
@@ -874,6 +900,8 @@ mod tests {
             run_output: None,
             auto_junit_reports: false,
             no_auto_junit_reports: false,
+            auto_runner_adapt: false,
+            no_auto_runner_adapt: false,
             dedup_failures: false,
             no_dedup_failures: false,
             max_failure_notifications: None,
@@ -921,6 +949,8 @@ mod tests {
             run_output: None,
             auto_junit_reports: false,
             no_auto_junit_reports: false,
+            auto_runner_adapt: false,
+            no_auto_runner_adapt: false,
             dedup_failures: false,
             no_dedup_failures: false,
             max_failure_notifications: None,
@@ -956,6 +986,7 @@ mod tests {
         let _junit_only = ScopedEnv::set("TAPCUE_JUNIT_ONLY", "true");
         let _auto_junit = ScopedEnv::set("TAPCUE_AUTO_JUNIT_REPORTS", "false");
         let _run_output = ScopedEnv::set("TAPCUE_RUN_OUTPUT", "off");
+        let _auto_runner_adapt = ScopedEnv::set("TAPCUE_AUTO_RUNNER_ADAPT", "false");
 
         let mut cfg = EffectiveConfig::default();
         cfg.merge_env();
@@ -971,6 +1002,7 @@ mod tests {
         assert!(cfg.junit_only);
         assert!(!cfg.auto_junit_reports);
         assert_eq!(cfg.run_output, RunOutputMode::Off);
+        assert!(!cfg.auto_runner_adapt);
     }
 
     #[test]
@@ -1023,6 +1055,7 @@ mod tests {
             summary_format: SummaryFormat::Json,
             summary_file: Some(PathBuf::from("out.json")),
             run_output: RunOutputMode::Split,
+            auto_runner_adapt: true,
             junit_file: Vec::new(),
             junit_dir: Vec::new(),
             junit_glob: Vec::new(),
@@ -1045,6 +1078,8 @@ mod tests {
         assert!(rendered.contains("[output]"));
         assert!(rendered.contains("summary_format = \"json\""));
         assert!(rendered.contains("summary_file = \"out.json\""));
+        assert!(rendered.contains("[run]"));
+        assert!(rendered.contains("auto_runner_adapt = true"));
         assert!(rendered.contains("[junit]"));
         assert!(rendered.contains("auto_reports = true"));
         assert!(rendered.contains("enabled = true"));
@@ -1080,6 +1115,8 @@ mod tests {
             run_output: None,
             auto_junit_reports: false,
             no_auto_junit_reports: false,
+            auto_runner_adapt: false,
+            no_auto_runner_adapt: false,
             dedup_failures: false,
             no_dedup_failures: false,
             max_failure_notifications: None,

@@ -148,6 +148,10 @@ impl TapStreamProcessor {
                 return;
             }
 
+            if self.subtest_lines.is_empty() && trimmed.is_empty() {
+                return;
+            }
+
             if self.subtest_lines.is_empty() {
                 self.capturing_subtest = false;
             } else {
@@ -904,6 +908,17 @@ mod tests {
 
         assert_eq!(state.total, 2);
         assert_eq!(state.passed, 2);
+        assert_eq!(state.failed, 0);
+        assert_eq!(state.protocol_failures, 0);
+        assert!(state.is_success());
+    }
+
+    #[test]
+    fn nested_subtest_allows_blank_line_before_indented_body() {
+        let input =
+            "TAP version 14\n# Subtest: nested\n\n    1..1\n    ok 1 - child\nok 1 - nested\n1..1\n";
+        let (state, _notifier) = process_input(input);
+
         assert_eq!(state.failed, 0);
         assert_eq!(state.protocol_failures, 0);
         assert!(state.is_success());

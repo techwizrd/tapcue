@@ -5,7 +5,7 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.75-blue?logo=rust)](https://github.com/techwizrd/tapcue/blob/main/Cargo.toml)
 [![License](https://img.shields.io/github/license/techwizrd/tapcue)](LICENSE)
 
-`tapcue` reads TAP (Test Anything Protocol) and JSON test output from `stdin` and sends desktop notifications for:
+`tapcue` reads TAP (Test Anything Protocol) and JSON test output from test runners (recommended via `tapcue run -- ...`, or from `stdin`) and sends desktop notifications for:
 
 - failing tests
 - bailouts
@@ -15,15 +15,30 @@ It is designed for streaming TAP input and incremental parsing. 🦀
 
 Common runner inputs include:
 
-- `go test -json`
-- `cargo nextest --message-format libtest-json-plus`
-- `jest --json`
-- `vitest --reporter=json`
+- `go test`
+- `cargo nextest run`
+- `jest`
+- `vitest run`
 - `bun test`
+- `pytest`
 
 ## Runner examples
 
-These commands are local/dev-style runs that trigger desktop notifications:
+Use `tapcue run -- ...` as the default approach so `tapcue` captures both stdout and stderr directly. In run mode, `tapcue` auto-adapts known runners (Go, cargo-nextest, Jest, Vitest, pytest) to machine-readable output where needed, including common pytest wrappers such as `uv run pytest` and `poetry run pytest`.
+
+Disable runner adaptation per run with `--no-auto-runner-adapt`, or in config with `[run] auto_runner_adapt = false`.
+
+```bash
+tapcue run -- go test ./...
+tapcue run -- cargo nextest run
+tapcue run -- npm test --silent
+tapcue run -- bun test
+tapcue run -- jest
+tapcue run -- vitest run
+tapcue run -- pytest
+```
+
+If you need shell pipelines/composition, stdin mode is supported:
 
 ```bash
 go test ./... -json | tapcue
@@ -33,14 +48,6 @@ bun test 2>&1 | tapcue
 jest --json --outputFile /dev/stdout | tapcue
 vitest run --reporter=json | tapcue
 pytest --tap-stream | tapcue
-```
-
-Or let `tapcue` run a command and capture both stdout+stderr itself:
-
-```bash
-tapcue run -- bun test
-tapcue run -- go test ./... -json
-tapcue --junit-dir build/test-results run -- ./gradlew test
 ```
 
 ## Install / Build
@@ -81,6 +88,7 @@ cargo install --git https://github.com/techwizrd/tapcue --branch main tapcue --f
 - `--junit-only`: skip stdin parser and use only JUnit reports
 - `--auto-junit-reports` / `--no-auto-junit-reports`: control run-mode JUnit auto-discovery
 - `--run-output <split|merged|off>`: passthrough behavior for `tapcue run -- ...`
+- `--auto-runner-adapt` / `--no-auto-runner-adapt`: enable/disable run-mode output adaptation for known test runners
 - `--dedup-failures` / `--no-dedup-failures`: control repeated failure notifications
 - `--max-failure-notifications <N>`: cap emitted failure notifications per run
 - `--trace-detection`: print auto format detection decisions
@@ -121,6 +129,7 @@ Supported environment variables:
 - `TAPCUE_JUNIT_ONLY` (`true/false`)
 - `TAPCUE_AUTO_JUNIT_REPORTS` (`true/false`)
 - `TAPCUE_RUN_OUTPUT` (`split`, `merged`, `off`)
+- `TAPCUE_AUTO_RUNNER_ADAPT` (`true/false`)
 
 macOS notification backend notes:
 
@@ -155,6 +164,7 @@ summary_format = "none"
 
 [run]
 output = "split"
+auto_runner_adapt = true
 
 [junit]
 file = []
@@ -185,7 +195,7 @@ Dogfooding with this repository's tests:
 Automation-friendly summary example:
 
 ```bash
-go test ./... -json | tapcue --summary-format json --summary-file run-summary.json
+tapcue --summary-format json --summary-file run-summary.json run -- go test ./...
 
 # JUnit XML report file ingestion
 tapcue --junit-file build/test-results/test/TEST-com.example.MathTest.xml --junit-only
@@ -200,13 +210,13 @@ tapcue run -- mvn test
 CI-oriented mode (no desktop notifications, emit machine-readable summary):
 
 ```bash
-go test ./... -json | tapcue --no-notify --summary-format json --summary-file run-summary.json
+tapcue --no-notify --summary-format json --summary-file run-summary.json run -- go test ./...
 ```
 
 Emit summary JSON to stdout explicitly:
 
 ```bash
-go test ./... -json | tapcue --summary-format json --summary-file -
+tapcue --summary-format json --summary-file - run -- go test ./...
 ```
 
 Detailed auto-detection and parser behavior is documented in

@@ -4,6 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use std::time::Duration;
 use tempfile::tempdir;
 
 fn fixture(name: &str) -> String {
@@ -292,6 +293,23 @@ fn junit_only_mode_succeeds_for_passing_report_file() {
 }
 
 #[test]
+fn junit_only_mode_emits_text_summary_for_fresh_report() {
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .arg("--summary-format")
+        .arg("text")
+        .arg("--summary-file")
+        .arg("-")
+        .arg("--junit-file")
+        .arg("tests/fixtures/junit_success.xml")
+        .arg("--junit-only")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("status=success"))
+        .stdout(predicate::str::contains("total=2"));
+}
+
+#[test]
 fn junit_only_requires_report_inputs() {
     Command::new(env!("CARGO_BIN_EXE_tapcue"))
         .arg("--no-notify")
@@ -349,6 +367,7 @@ fn run_mode_uses_existing_inferred_gradle_report_when_up_to_date() {
         "<testsuite name=\"sample-suite\"><testcase classname=\"sample\" name=\"ok\" /></testsuite>",
     )
     .expect("report should write");
+    std::thread::sleep(Duration::from_secs(3));
 
     let gradlew = dir.path().join("gradlew");
     let script = r#"#!/usr/bin/env sh
@@ -374,4 +393,87 @@ echo "BUILD SUCCESSFUL in 1s"
         .assert()
         .success()
         .stdout(predicates::str::contains("status=").not());
+}
+
+#[cfg(unix)]
+#[test]
+fn junit_only_run_mode_ignores_stale_explicit_reports() {
+    let dir = tempdir().expect("temp dir should create");
+    let report_dir = dir.path().join("build/test-results/test");
+    fs::create_dir_all(&report_dir).expect("report directory should create");
+    fs::write(
+        report_dir.join("TEST-sample.xml"),
+        "<testsuite name=\"sample-suite\"><testcase classname=\"sample\" name=\"ok\" /></testsuite>",
+    )
+    .expect("report should write");
+    std::thread::sleep(Duration::from_secs(3));
+
+    let gradlew = dir.path().join("gradlew");
+    let script = r#"#!/usr/bin/env sh
+set -eu
+echo "> Task :app:testDebugUnitTest UP-TO-DATE"
+echo "BUILD SUCCESSFUL in 1s"
+"#;
+    fs::write(&gradlew, script).expect("gradlew script should write");
+    let mut permissions =
+        fs::metadata(&gradlew).expect("gradlew metadata should read").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&gradlew, permissions).expect("gradlew permissions should set");
+
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .arg("--summary-format")
+        .arg("text")
+        .arg("--junit-dir")
+        .arg("build/test-results")
+        .arg("--junit-only")
+        .arg("run")
+        .arg("--")
+        .arg("./gradlew")
+        .arg("testDebugUnitTest")
+        .current_dir(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("status=").not());
+}
+
+#[cfg(unix)]
+#[test]
+fn run_mode_keeps_stream_summary_when_explicit_junit_is_stale() {
+    let dir = tempdir().expect("temp dir should create");
+    let report_dir = dir.path().join("build/test-results/test");
+    fs::create_dir_all(&report_dir).expect("report directory should create");
+    fs::write(
+        report_dir.join("TEST-stale.xml"),
+        "<testsuite name=\"stale\"><testcase classname=\"sample\" name=\"old\" /></testsuite>",
+    )
+    .expect("stale report should write");
+    std::thread::sleep(Duration::from_secs(3));
+
+    let runner = dir.path().join("runner.sh");
+    let script = r#"#!/usr/bin/env sh
+set -eu
+printf 'TAP version 14\n1..1\nok 1 - fresh\n'
+"#;
+    fs::write(&runner, script).expect("runner script should write");
+    let mut permissions = fs::metadata(&runner).expect("runner metadata should read").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&runner, permissions).expect("runner permissions should set");
+
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("--no-notify")
+        .arg("--summary-format")
+        .arg("text")
+        .arg("--summary-file")
+        .arg("-")
+        .arg("--junit-dir")
+        .arg("build/test-results")
+        .arg("run")
+        .arg("--")
+        .arg("./runner.sh")
+        .current_dir(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("status=success"))
+        .stdout(predicate::str::contains("total=1"));
 }

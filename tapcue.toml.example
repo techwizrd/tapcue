@@ -13,3 +13,7 @@ dedup_failures = true
 [output]
 summary_format = "none"
 # summary_file = "tapcue-summary.json"
+
+[run]
+output = "split"
+auto_runner_adapt = true

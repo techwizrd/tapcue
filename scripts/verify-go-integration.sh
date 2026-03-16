@@ -37,7 +37,7 @@ if ! grep -q '"Action":"fail"' "$tmp_file"; then
 fi
 
 set +e
-"$TAPCUE_BIN" --format auto --no-notify <"$tmp_file"
+"$TAPCUE_BIN" --format auto --no-notify --run-output off run -- go -C "$ROOT_DIR/tests/runner-fixtures/go-sample" test ./...
 tapcue_status=$?
 set -e
 

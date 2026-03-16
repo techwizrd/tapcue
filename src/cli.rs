@@ -93,6 +93,22 @@ pub struct Cli {
     #[arg(
         long,
         action = ArgAction::SetTrue,
+        conflicts_with = "no_auto_runner_adapt",
+        help = "Auto-adapt known test runner commands in run mode"
+    )]
+    pub auto_runner_adapt: bool,
+
+    #[arg(
+        long,
+        action = ArgAction::SetTrue,
+        conflicts_with = "auto_runner_adapt",
+        help = "Disable run-mode auto adaptation for known test runners"
+    )]
+    pub no_auto_runner_adapt: bool,
+
+    #[arg(
+        long,
+        action = ArgAction::SetTrue,
         conflicts_with = "no_dedup_failures",
         help = "Deduplicate repeated failure notifications"
     )]
@@ -139,6 +155,8 @@ impl Cli {
             run_output: None,
             auto_junit_reports: false,
             no_auto_junit_reports: false,
+            auto_runner_adapt: false,
+            no_auto_runner_adapt: false,
             dedup_failures: false,
             no_dedup_failures: false,
             max_failure_notifications: None,
@@ -275,6 +293,7 @@ mod tests {
             "--run-output",
             "merged",
             "--no-auto-junit-reports",
+            "--auto-runner-adapt",
             "--dedup-failures",
             "--max-failure-notifications",
             "12",
@@ -296,6 +315,7 @@ mod tests {
         assert!(cli.junit_only);
         assert_eq!(cli.run_output, Some(CliRunOutputMode::Merged));
         assert!(cli.no_auto_junit_reports);
+        assert!(cli.auto_runner_adapt);
         assert!(cli.dedup_failures);
         assert_eq!(cli.max_failure_notifications, Some(12));
         assert!(cli.trace_detection);

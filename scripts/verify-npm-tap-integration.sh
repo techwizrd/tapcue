@@ -39,7 +39,7 @@ if ! grep -q '^not ok ' "$tmp_file"; then
 fi
 
 set +e
-"$TAPCUE_BIN" --format auto --no-notify --quiet-parse-errors <"$tmp_file"
+"$TAPCUE_BIN" --format auto --no-notify --quiet-parse-errors --run-output off run -- npm test --prefix "$FIXTURE_DIR" --silent
 tapcue_status=$?
 set -e
 

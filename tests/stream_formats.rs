@@ -48,7 +48,7 @@ fn auto_detects_vitest_json_report() {
 fn auto_detects_tap_output_from_npm_test() {
     Command::new(env!("CARGO_BIN_EXE_tapcue"))
         .arg("--no-notify")
-        .write_stdin(fixture("npm_tap.tap"))
+        .write_stdin(fixture("npm_tap.txt"))
         .assert()
         .failure();
 }

@@ -38,7 +38,7 @@ if ! grep -Eq '\(fail\)|[[:space:]]fail' "$tmp_file"; then
 fi
 
 set +e
-"$TAPCUE_BIN" --format auto --no-notify <"$tmp_file"
+"$TAPCUE_BIN" --format auto --no-notify --run-output off run -- bun test "$FIXTURE_DIR"
 tapcue_status=$?
 set -e
 

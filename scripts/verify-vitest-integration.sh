@@ -39,7 +39,7 @@ if ! grep -q '"numFailedTests"' "$tmp_file"; then
 fi
 
 set +e
-"$TAPCUE_BIN" --format json --no-notify <"$tmp_file"
+"$TAPCUE_BIN" --format json --no-notify --run-output off run -- npm run --prefix "$FIXTURE_DIR" test:json --silent
 tapcue_status=$?
 set -e
 

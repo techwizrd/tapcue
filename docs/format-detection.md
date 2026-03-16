@@ -13,6 +13,9 @@ In `tapcue run -- ...` mode, JUnit auto-discovery defaults are applied for
 common tools (`gradle`/`gradlew`, `mvn`/`mvnw`) unless disabled with
 `--no-auto-junit-reports`.
 
+Run mode can also auto-adapt known runner arguments for machine-readable output
+unless disabled with `--no-auto-runner-adapt`.
+
 ## How `auto` works
 
 `auto` inspects incoming stream content line-by-line and picks a parser once it has a strong signal.
@@ -74,15 +77,15 @@ tapcue --trace-detection
 
 ## Notes for Bun
 
-Some Bun versions/environments emit reporter lines on stderr. In plain pipe mode,
-merge stderr into stdout:
-
-```bash
-bun test 2>&1 | tapcue
-```
-
-Or use command mode:
+Some Bun versions/environments emit reporter lines on stderr. Prefer run mode so
+`tapcue` captures both streams automatically:
 
 ```bash
 tapcue run -- bun test
+```
+
+If you use plain pipe mode, merge stderr into stdout:
+
+```bash
+bun test 2>&1 | tapcue
 ```

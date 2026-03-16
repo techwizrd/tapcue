@@ -395,10 +395,7 @@ impl EffectiveConfig {
         }
 
         if let Ok(value) = env::var("TAPCUE_PROJECT_LABEL") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.project_label = Some(trimmed.to_owned());
-            }
+            self.project_label = normalize_optional_text(&value);
         }
 
         if let Some(value) = read_env_input_format("TAPCUE_FORMAT") {
@@ -507,10 +504,7 @@ impl EffectiveConfig {
         }
 
         if let Some(value) = &cli.project_label {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.project_label = Some(trimmed.to_owned());
-            }
+            self.project_label = normalize_optional_text(value);
         }
 
         if let Some(value) = cli.format {
@@ -769,7 +763,20 @@ fn read_env_string_list(key: &str) -> Option<Vec<String>> {
         .filter(|entry| !entry.is_empty())
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    Some(values)
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
+}
+
+fn normalize_optional_text(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
 }
 
 fn read_env_path_list(key: &str) -> Option<Vec<PathBuf>> {

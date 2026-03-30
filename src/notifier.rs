@@ -1029,8 +1029,9 @@ mod tests {
     }
 
     #[test]
-    fn macos_compact_body_keeps_summary_readable() {
+    fn macos_compact_body_preserves_summary_body_for_both_outcomes() {
         let summary = "status: failure; total: 3; passed: 2; failed: 1";
+        assert_eq!(macos_compact_body(NotificationKind::SummarySuccess, summary), summary);
         assert_eq!(macos_compact_body(NotificationKind::SummaryFailure, summary), summary);
     }
 
@@ -1038,6 +1039,7 @@ mod tests {
     fn macos_metadata_is_kind_specific() {
         assert_eq!(macos_subtitle(NotificationKind::Failure), "Test Failure");
         assert_eq!(macos_subtitle(NotificationKind::Bailout), "Run Aborted");
+        assert_eq!(macos_subtitle(NotificationKind::SummarySuccess), "Run Summary");
         assert_eq!(macos_group(NotificationKind::Failure), "tapcue-failure");
         assert_eq!(macos_group(NotificationKind::SummarySuccess), "tapcue-summary");
         assert_eq!(macos_sound(NotificationKind::Failure), None);

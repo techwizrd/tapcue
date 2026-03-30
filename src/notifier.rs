@@ -592,15 +592,23 @@ impl ShellNotificationSender {
 
 #[cfg(any(target_os = "macos", test))]
 fn detect_macos_backend(platform: Platform) -> Option<MacOsBackend> {
+    detect_macos_backend_with(platform, command_in_path)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn detect_macos_backend_with(
+    platform: Platform,
+    has_command: impl Fn(&str) -> bool,
+) -> Option<MacOsBackend> {
     if platform != Platform::MacOs {
         return None;
     }
 
-    if command_in_path("terminal-notifier") {
+    if has_command("terminal-notifier") {
         return Some(MacOsBackend::TerminalNotifier);
     }
 
-    if command_in_path("osascript") {
+    if has_command("osascript") {
         return Some(MacOsBackend::OsaScript);
     }
 
@@ -801,10 +809,10 @@ mod tests {
 
     use super::{
         build_doctor_report, compact_failure_body_for_macos, desktop_notifications_available,
-        escape_applescript_string, macos_compact_body, macos_group, macos_sound, macos_subtitle,
-        DesktopNotifier, Environment, FailureNotification, FailureSource, LinuxEnvironmentStatus,
-        NotificationDoctorSignals, NotificationKind, NotificationPolicy, NotificationSender,
-        Platform, PolicyNotifier,
+        detect_macos_backend_with, escape_applescript_string, macos_compact_body, macos_group,
+        macos_sound, macos_subtitle, DesktopNotifier, Environment, FailureNotification,
+        FailureSource, LinuxEnvironmentStatus, MacOsBackend, NotificationDoctorSignals,
+        NotificationKind, NotificationPolicy, NotificationSender, Platform, PolicyNotifier,
     };
     use crate::config::DesktopMode;
     use crate::notifier::Notifier;
@@ -1036,14 +1044,72 @@ mod tests {
     }
 
     #[test]
-    fn macos_metadata_is_kind_specific() {
+    fn macos_compact_body_trims_bailout_message() {
+        let body = "  catastrophic stop  ";
+        assert_eq!(macos_compact_body(NotificationKind::Bailout, body), "catastrophic stop");
+    }
+
+    #[test]
+    fn macos_subtitle_is_kind_specific() {
         assert_eq!(macos_subtitle(NotificationKind::Failure), "Test Failure");
         assert_eq!(macos_subtitle(NotificationKind::Bailout), "Run Aborted");
         assert_eq!(macos_subtitle(NotificationKind::SummarySuccess), "Run Summary");
+        assert_eq!(macos_subtitle(NotificationKind::SummaryFailure), "Run Summary");
+    }
+
+    #[test]
+    fn macos_group_is_kind_specific() {
         assert_eq!(macos_group(NotificationKind::Failure), "tapcue-failure");
         assert_eq!(macos_group(NotificationKind::SummarySuccess), "tapcue-summary");
+        assert_eq!(macos_group(NotificationKind::SummaryFailure), "tapcue-summary");
+    }
+
+    #[test]
+    fn macos_sound_is_kind_specific() {
         assert_eq!(macos_sound(NotificationKind::Failure), None);
         assert_eq!(macos_sound(NotificationKind::Bailout), Some("Basso"));
+        assert_eq!(macos_sound(NotificationKind::SummarySuccess), None);
+        assert_eq!(macos_sound(NotificationKind::SummaryFailure), Some("Funk"));
+    }
+
+    #[test]
+    fn macos_backend_prefers_terminal_notifier() {
+        let backend = detect_macos_backend_with(Platform::MacOs, |command| {
+            command == "terminal-notifier" || command == "osascript"
+        });
+        assert_eq!(backend, Some(MacOsBackend::TerminalNotifier));
+    }
+
+    #[test]
+    fn macos_backend_falls_back_to_osascript() {
+        let backend = detect_macos_backend_with(Platform::MacOs, |command| command == "osascript");
+        assert_eq!(backend, Some(MacOsBackend::OsaScript));
+    }
+
+    #[test]
+    fn macos_backend_detection_is_disabled_for_non_macos_platforms() {
+        let backend = detect_macos_backend_with(Platform::Linux, |_| true);
+        assert_eq!(backend, None);
+    }
+
+    #[test]
+    fn macos_notifier_sends_without_desktop_env_markers() {
+        let (sender, shared) = RecordingSender::shared();
+        let mut notifier = DesktopNotifier::with_components(
+            Platform::MacOs,
+            DesktopMode::Auto,
+            None,
+            Box::new(FakeEnvironment::new(&[])),
+            Box::new(sender),
+        );
+
+        notifier.notify_summary(&sample_state());
+
+        let notifications = shared.lock().expect("lock should not be poisoned");
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].0, NotificationKind::SummaryFailure);
+        assert_eq!(notifications[0].1, "Run summary");
+        assert!(notifications[0].2.contains("status: failure"));
     }
 
     #[test]

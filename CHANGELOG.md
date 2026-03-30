@@ -22,8 +22,10 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 - Hooking workflow standardized on `prek` with root `.pre-commit-config.yaml` compatibility.
 - Desktop diagnostics command is now `tapcue doctor` (subcommand form).
 - macOS notifications now prefer `terminal-notifier` when available, with `osascript` fallback.
+- macOS notification copy now matches Linux wording for failure, bailout, and run-summary subtitles while preserving structured summary body text.
 - CI now publishes a single rolling prerelease tag (`unreleased`) on untagged `main` pushes.
 - CI now runs Rust checks on Linux/macOS/Windows and adds Linux toolchain coverage for 1.86.0, stable, and nightly (nightly allowed to fail).
+- Pull request validation checklist now matches CONTRIBUTING required checks (`cargo check --locked` and `cargo doc --locked`).
 
 ### Fixed
 - CR-only TAP line endings now parse correctly (`\r` separators).

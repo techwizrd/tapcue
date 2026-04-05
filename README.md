@@ -5,11 +5,23 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.86-blue?logo=rust)](https://github.com/techwizrd/tapcue/blob/main/Cargo.toml)
 [![License](https://img.shields.io/github/license/techwizrd/tapcue)](LICENSE)
 
-`tapcue` 🦀 reads TAP (Test Anything Protocol), JSON test output, Bun, and JUnit XML from test runners (recommended via `tapcue run -- ...`, or from `stdin`) and sends desktop notifications for:
+`tapcue` 🦀 provides desktop notifications for test results across TAP, JSON, Bun, and JUnit XML.
 
-- failing tests
-- bailouts
-- final run summary
+For developers who run tests from the CLI and want immediate signal when something fails.
+Use your existing test command and get notifications for failing tests, bailouts, and final run summary.
+
+```bash
+brew install techwizrd/tap/tapcue
+tapcue run -- pytest
+```
+
+![tapcue desktop notification on GNOME/Linux](docs/media/tapcue-notification-cutout.png)
+
+Why teams use `tapcue`:
+
+- Works across mixed test output formats (TAP, JSON streams, Bun output, JUnit XML reports)
+- Wraps existing commands with `tapcue run -- ...` (no test rewrite required)
+- Captures stdout + stderr and auto-adapts known runners to machine-readable output
 
 Common runner inputs include:
 
@@ -50,7 +62,13 @@ pytest --tap-stream | tapcue
 
 ## Quickstart
 
-Install from GitHub with Cargo:
+Install with Homebrew:
+
+```bash
+brew install techwizrd/tap/tapcue
+```
+
+Or install from GitHub with Cargo:
 
 ```bash
 cargo install --git https://github.com/techwizrd/tapcue tapcue
@@ -62,10 +80,52 @@ Then run it with your test command:
 tapcue run -- pytest
 ```
 
-Install with Homebrew (without a separate `brew tap` step):
+## When to use `tapcue`
+
+Use `tapcue` when you want fast local feedback without watching terminal output constantly.
+
+- You run tests frequently from the CLI and want immediate failure notifications
+- Your project mixes runners or formats across tools, languages, or repos
+- You want a small wrapper around existing test commands instead of custom reporter setup
+
+## Why not just use X?
+
+`tapcue` is for local developer feedback, not a replacement for CI or full test reporting.
+
+- Raw terminal output: useful when you are actively watching it, but easy to miss during long runs or multitasking
+- CI notifications: arrive later and help after the push, while `tapcue` helps during local iteration
+- Runner-specific reporters: work well for one tool, but `tapcue` gives one notification flow across TAP, JSON, Bun, and JUnit XML
+
+## Copy-paste examples
+
+Run your existing test command and get desktop notifications:
 
 ```bash
-brew install techwizrd/tap/tapcue
+tapcue run -- pytest
+tapcue run -- go test ./...
+tapcue run -- cargo nextest run
+```
+
+Use `tapcue` in shell pipelines when you already have machine-readable output:
+
+```bash
+go test ./... -json | tapcue
+vitest run --reporter=json | tapcue
+pytest --tap-stream | tapcue
+```
+
+Ingest JUnit XML reports from tools that write files instead of streaming results:
+
+```bash
+tapcue --junit-dir build/test-results --junit-only
+tapcue run -- ./gradlew test
+tapcue run -- mvn test
+```
+
+Use CI-oriented mode when you want summary output without desktop notifications:
+
+```bash
+tapcue --no-notify --summary-format json --summary-file run-summary.json run -- go test ./...
 ```
 
 ## Install / Build

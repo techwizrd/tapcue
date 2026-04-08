@@ -2,7 +2,7 @@
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 OUT_DIR="$ROOT/docs/media"
 FULL_OUT="$OUT_DIR/tapcue-notification-full.png"
 CROP_OUT="$OUT_DIR/tapcue-notification.png"
@@ -12,7 +12,9 @@ mkdir -p "$OUT_DIR"
 # Trigger a real tapcue notification, then ask the GNOME portal for a screenshot.
 sh -lc '"$1" >/dev/null 2>&1 || true & sleep 1; gdbus call --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop --method org.freedesktop.portal.Screenshot.Screenshot "" "{\"interactive\": <false>, \"handle_token\": <\"tapcuecap2\">}" >/dev/null; sleep 2' sh "$ROOT/scripts/show-readme-notification.sh"
 
-LATEST=$(ls -t "$HOME"/Pictures/Screenshot*.png 2>/dev/null | head -1)
+LATEST=$(find "$HOME"/Pictures -maxdepth 1 -type f -name 'Screenshot*.png' -print0 \
+  | xargs -0 ls -1t 2>/dev/null \
+  | head -1)
 
 if [ -z "${LATEST:-}" ]; then
   echo "no portal screenshot found in $HOME/Pictures" >&2

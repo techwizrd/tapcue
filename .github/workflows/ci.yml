@@ -596,7 +596,7 @@ jobs:
           echo "artifact_sha_path=dist/${artifact_name}.sha256" >> "$GITHUB_OUTPUT"
 
       - name: Publish prerelease from main
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: unreleased
           name: tapcue unreleased
@@ -759,7 +759,7 @@ jobs:
           done
 
       - name: Publish tagged release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}

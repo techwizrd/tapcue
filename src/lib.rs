@@ -243,7 +243,7 @@ mod tests {
 
     use crate::notifier::{FailureNotification, Notifier};
 
-    use super::{detect_auto_format, fallback_format, process_stream, AppConfig, RunState};
+    use super::{AppConfig, RunState, detect_auto_format, fallback_format, process_stream};
 
     #[derive(Default)]
     struct RecordingNotifier {

@@ -190,11 +190,7 @@ fn normalize_inline_label(rest: &str) -> Option<String> {
 
     let label = trimmed.split_once('[').map(|(left, _)| left.trim_end()).unwrap_or(trimmed).trim();
 
-    if label.is_empty() {
-        None
-    } else {
-        Some(label.to_owned())
-    }
+    if label.is_empty() { None } else { Some(label.to_owned()) }
 }
 
 fn parse_failure_section_label(line: &str) -> Option<String> {
@@ -223,11 +219,7 @@ fn parse_ran_total(line: &str) -> Option<usize> {
     let mut tokens = rest.split_whitespace();
     let total = tokens.next()?.parse::<usize>().ok()?;
     let noun = tokens.next()?;
-    if noun.starts_with("test") {
-        Some(total)
-    } else {
-        None
-    }
+    if noun.starts_with("test") { Some(total) } else { None }
 }
 
 fn parse_summary_count(line: &str) -> Option<(SummaryKind, usize)> {
@@ -296,11 +288,7 @@ fn parse_dot_progress(line: &str) -> Option<DotCounts> {
         }
     }
 
-    if saw_progress {
-        Some(counts)
-    } else {
-        None
-    }
+    if saw_progress { Some(counts) } else { None }
 }
 
 #[cfg(test)]

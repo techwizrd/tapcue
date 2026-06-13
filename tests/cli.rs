@@ -263,6 +263,18 @@ fn doctor_explains_environment_disabled_notifications() {
 }
 
 #[test]
+fn doctor_notifications_is_a_quick_checklist() {
+    Command::new(env!("CARGO_BIN_EXE_tapcue"))
+        .arg("doctor")
+        .arg("--notifications")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("doctor --notifications:"))
+        .stdout(predicates::str::contains("next steps:"))
+        .stdout(predicates::str::contains("quick test:"));
+}
+
+#[test]
 fn doctor_flag_is_not_supported() {
     Command::new(env!("CARGO_BIN_EXE_tapcue"))
         .arg("--doctor")

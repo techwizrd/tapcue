@@ -182,8 +182,14 @@ impl Cli {
 #[derive(Debug, Subcommand)]
 pub enum CliCommand {
     Init(InitCli),
-    Doctor,
+    Doctor(DoctorCli),
     Run(RunCli),
+}
+
+#[derive(Debug, Args)]
+pub struct DoctorCli {
+    #[arg(long, help = "Show beginner-friendly notification setup checklist")]
+    pub notifications: bool,
 }
 
 #[derive(Debug, Args)]
@@ -356,7 +362,19 @@ mod tests {
     #[test]
     fn parses_doctor_subcommand() {
         let cli = Cli::parse_from(["tapcue", "doctor"]);
-        assert!(matches!(cli.command, Some(CliCommand::Doctor)));
+        match cli.command {
+            Some(CliCommand::Doctor(doctor)) => assert!(!doctor.notifications),
+            _ => panic!("expected doctor subcommand"),
+        }
+    }
+
+    #[test]
+    fn parses_doctor_notifications_subcommand() {
+        let cli = Cli::parse_from(["tapcue", "doctor", "--notifications"]);
+        match cli.command {
+            Some(CliCommand::Doctor(doctor)) => assert!(doctor.notifications),
+            _ => panic!("expected doctor subcommand"),
+        }
     }
 
     #[test]

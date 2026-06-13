@@ -3,13 +3,13 @@ use tapcue::config::InputFormat;
 use tapcue::json_stream::JsonStreamProcessor;
 use tapcue::notifier::{FailureNotification, Notifier};
 use tapcue::processor::{RunState, TapStreamProcessor};
-use tapcue::{process_stream, AppConfig};
+use tapcue::{AppConfig, process_stream};
 
 mod common;
 
 use common::property_strategies::{
-    assert_state_invariants, ingest_text_chunks, json_outcome_strategy, render_go_json_case,
-    render_tap_case, tap_outcome_strategy, ChunkedReader, JsonOutcome, TapOutcome,
+    ChunkedReader, JsonOutcome, TapOutcome, assert_state_invariants, ingest_text_chunks,
+    json_outcome_strategy, render_go_json_case, render_tap_case, tap_outcome_strategy,
 };
 
 #[derive(Default)]

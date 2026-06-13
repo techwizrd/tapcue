@@ -808,11 +808,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::{
-        build_doctor_report, compact_failure_body_for_macos, desktop_notifications_available,
-        detect_macos_backend_with, escape_applescript_string, macos_compact_body, macos_group,
-        macos_sound, macos_subtitle, DesktopNotifier, Environment, FailureNotification,
-        FailureSource, LinuxEnvironmentStatus, MacOsBackend, NotificationDoctorSignals,
-        NotificationKind, NotificationPolicy, NotificationSender, Platform, PolicyNotifier,
+        DesktopNotifier, Environment, FailureNotification, FailureSource, LinuxEnvironmentStatus,
+        MacOsBackend, NotificationDoctorSignals, NotificationKind, NotificationPolicy,
+        NotificationSender, Platform, PolicyNotifier, build_doctor_report,
+        compact_failure_body_for_macos, desktop_notifications_available, detect_macos_backend_with,
+        escape_applescript_string, macos_compact_body, macos_group, macos_sound, macos_subtitle,
     };
     use crate::config::DesktopMode;
     use crate::notifier::Notifier;
@@ -1023,8 +1023,7 @@ mod tests {
 
     #[test]
     fn macos_failure_body_prefers_test_and_reason() {
-        let full_body =
-            "Runner: go\nSuite: pkg/server\nFile: server/http_test.go\nTest: TestHTTP\nReason: expected 200, got 500";
+        let full_body = "Runner: go\nSuite: pkg/server\nFile: server/http_test.go\nTest: TestHTTP\nReason: expected 200, got 500";
         let compact = compact_failure_body_for_macos(full_body);
         assert_eq!(compact, "TestHTTP - expected 200, got 500");
     }

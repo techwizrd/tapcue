@@ -115,11 +115,7 @@ fn failure_reason(failure_node: Node<'_, '_>) -> Option<String> {
     }
 
     let text = failure_node.text().unwrap_or("").trim();
-    if text.is_empty() {
-        None
-    } else {
-        Some(first_line(text))
-    }
+    if text.is_empty() { None } else { Some(first_line(text)) }
 }
 
 fn first_line(raw: &str) -> String {

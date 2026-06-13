@@ -585,11 +585,7 @@ fn parse_directive(raw: &str) -> Option<ParsedDirective> {
 
 fn normalize_description(raw: &str) -> Option<Cow<'_, str>> {
     let unescaped = unescape_text(raw.trim());
-    if unescaped.is_empty() {
-        None
-    } else {
-        Some(unescaped)
-    }
+    if unescaped.is_empty() { None } else { Some(unescaped) }
 }
 
 fn unescape_text(input: &str) -> Cow<'_, str> {
@@ -947,8 +943,7 @@ mod tests {
 
     #[test]
     fn nested_subtest_allows_blank_line_before_indented_body() {
-        let input =
-            "TAP version 14\n# Subtest: nested\n\n    1..1\n    ok 1 - child\nok 1 - nested\n1..1\n";
+        let input = "TAP version 14\n# Subtest: nested\n\n    1..1\n    ok 1 - child\nok 1 - nested\n1..1\n";
         let (state, _notifier) = process_input(input);
 
         assert_eq!(state.failed, 0);

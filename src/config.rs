@@ -763,20 +763,12 @@ fn read_env_string_list(key: &str) -> Option<Vec<String>> {
         .filter(|entry| !entry.is_empty())
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    if values.is_empty() {
-        None
-    } else {
-        Some(values)
-    }
+    if values.is_empty() { None } else { Some(values) }
 }
 
 fn normalize_optional_text(value: &str) -> Option<String> {
     let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_owned())
-    }
+    if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
 }
 
 fn read_env_path_list(key: &str) -> Option<Vec<PathBuf>> {
@@ -812,7 +804,9 @@ mod tests {
     impl ScopedEnv {
         fn set(key: &'static str, value: &'static str) -> Self {
             let previous = env::var(key).ok();
-            env::set_var(key, value);
+            // SAFETY: Tests acquire env_lock before using ScopedEnv, serializing
+            // process-wide environment mutation with environment reads.
+            unsafe { env::set_var(key, value) };
             Self { key, previous }
         }
     }
@@ -820,8 +814,11 @@ mod tests {
     impl Drop for ScopedEnv {
         fn drop(&mut self) {
             match self.previous.as_deref() {
-                Some(value) => env::set_var(self.key, value),
-                None => env::remove_var(self.key),
+                // SAFETY: ScopedEnv is only used while holding env_lock in tests,
+                // so restoring the process environment is serialized as well.
+                Some(value) => unsafe { env::set_var(self.key, value) },
+                // SAFETY: See the safety note above.
+                None => unsafe { env::remove_var(self.key) },
             }
         }
     }

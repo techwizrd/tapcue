@@ -1,10 +1,10 @@
 use std::hint::black_box;
 use std::io::Read;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 use tapcue::notifier::{FailureNotification, Notifier};
-use tapcue::{process_stream, AppConfig};
+use tapcue::{AppConfig, process_stream};
 
 #[derive(Default)]
 struct NullBenchNotifier;

@@ -9,6 +9,8 @@ tapcue \- stream TAP/JSON test output and emit desktop notifications
 [\fI--current\fR] [\fI--force\fR]
 .br
 .B tapcue doctor
+.TP
+.B tapcue doctor --notifications
 .SH DESCRIPTION
 .B tapcue
 reads test output from standard input.
@@ -76,6 +78,9 @@ Print merged config and exit.
 .TP
 .B doctor
 Check desktop notification readiness and explain disabled-notification reasons.
+.TP
+.B doctor --notifications
+Show a short first-run checklist for notification setup.
 .TP
 .B init
 Create
@@ -176,6 +181,9 @@ Generate local config from current effective config:
 .TP
 Check desktop-notification readiness:
 .B tapcue doctor
+.TP
+Run notification onboarding checklist:
+.B tapcue doctor --notifications
 .SH EXIT STATUS
 .TP
 .B 0

@@ -80,6 +80,19 @@ Then run it with your test command:
 tapcue run -- pytest
 ```
 
+## 2-minute setup
+
+For first-time setup, run these in order:
+
+```bash
+brew install techwizrd/tap/tapcue
+tapcue doctor --notifications
+tapcue run -- pytest
+```
+
+If `tapcue doctor --notifications` shows a missing step, fix that one item, re-run
+`tapcue doctor --notifications`, and then try `tapcue run -- ...` again.
+
 ## When to use `tapcue`
 
 Use `tapcue` when you want fast local feedback without watching terminal output constantly.
@@ -174,7 +187,7 @@ cargo install --git https://github.com/techwizrd/tapcue tapcue --force
 - `--trace-detection`: print auto format detection decisions
 - `--validate-config`: validate merged config and exit
 - `--print-effective-config`: print merged config and exit
-- `doctor`: check desktop notification readiness and explain why notifications are disabled
+- `doctor [--notifications]`: check desktop notification readiness; use `--notifications` for a short onboarding checklist
 - `init [--current] [--force]`: write `./.tapcue.toml` from defaults or current effective config
 
 ## Configuration

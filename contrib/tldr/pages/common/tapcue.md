@@ -39,6 +39,10 @@
 
 `tapcue doctor`
 
+- Show a first-run onboarding checklist for notifications:
+
+`tapcue doctor --notifications`
+
 - Generate a local config file from built-in defaults:
 
 `tapcue init`
